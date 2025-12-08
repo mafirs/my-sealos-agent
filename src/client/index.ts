@@ -1,6 +1,6 @@
 // Force Node.js to prioritize IPv4 for DNS resolution
 // This fixes ENOTFOUND errors in Kubernetes environments (Node.js v17+)
-import dns from 'dns';
+import * as dns from 'dns';
 
 try {
   dns.setDefaultResultOrder('ipv4first');
@@ -18,10 +18,42 @@ if (result.error) {
 }
 
 // Other imports...
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { CleanedParameters, AIService } from './ai/ai-service';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+
+// Global variables for process tracking
+let activeMcpServers = new Set<ChildProcess>();
+let mainReadlineInterface: readline.Interface | null = null;
+let lastSigintTime = 0;
+
+function cleanupAndExit(code: number) {
+  // Kill all active MCP server processes
+  activeMcpServers.forEach(server => {
+    try {
+      if (!server.killed) {
+        server.kill('SIGTERM');
+        // Force kill after 3 seconds
+        setTimeout(() => {
+          if (!server.killed) {
+            server.kill('SIGKILL');
+          }
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('[Client] Error killing server process:', error);
+    }
+  });
+
+  // Close readline interface
+  if (mainReadlineInterface) {
+    mainReadlineInterface.close();
+  }
+
+  // Exit with the specified code
+  process.exit(code);
+}
 
 async function main() {
   // Initialize services
@@ -33,6 +65,9 @@ async function main() {
     output,
     prompt: 'sealos > '
   });
+
+  // Store reference for cleanup
+  mainReadlineInterface = rl;
 
   // Display welcome message
   console.log('[Client] Sealos SRE Agent Interactive Mode');
@@ -55,8 +90,8 @@ async function main() {
     // Handle exit commands
     if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit') {
       console.log('[Client] Goodbye!');
-      rl.close();
-      process.exit(0);
+      cleanupAndExit(0);
+      return;
     }
 
     try {
@@ -65,17 +100,27 @@ async function main() {
 
       // AI cleaning parameters
       console.error('[AI] Processing input...');
-      const cleanedParams = await aiService.parseRawInput(rawArgs);
+      const cleanedParamsList = await aiService.parseRawInput(rawArgs);
 
-      if (!cleanedParams) {
-        console.error('❌ Invalid input. Please provide 3 parameters: namespace, resource, identifier');
-        console.error('   Example: ns-mh69tey1 pods hzh');
+      if (!cleanedParamsList || cleanedParamsList.length === 0) {
+        console.error('❌ Invalid input. Please provide at least 2 parameters: namespace, [resources], identifier');
+        console.error('   Examples: ns-mh69tey1 pods hzh');
+        console.error('             ns-mh69tey1 pods devbox cluster hzh');
+        console.error('             ns-mh69tey1 hzh (defaults to pods)');
         rl.prompt();
         return;
       }
 
-      // Execute MCP task
-      await runMcpTask(cleanedParams);
+      // Execute MCP tasks (parallel or single based on array length)
+      if (cleanedParamsList.length === 1) {
+        // Single resource - use legacy function for backward compatibility
+        await runMcpTaskLegacy(cleanedParamsList[0]);
+      } else {
+        // Multiple resources - use parallel execution
+        console.error(`[Client] Querying ${cleanedParamsList.length} resource types in parallel...`);
+        const results = await runMcpTask(cleanedParamsList);
+        displayAggregatedResults(results);
+      }
 
     } catch (error) {
       console.error('❌ Error:', error instanceof Error ? error.message : 'Unknown error');
@@ -85,22 +130,67 @@ async function main() {
     rl.prompt();
   });
 
-  // Handle Ctrl+C
+  // Handle Ctrl+C with shell-like behavior
   rl.on('SIGINT', () => {
-    console.log('\n[Client] Use "exit" or "quit" to close');
-    rl.prompt();
+    const now = Date.now();
+
+    // If there's text in the current line, just clear it (like bash)
+    if (rl.line.length > 0) {
+      // 1. Visual feedback: print ^C and move to new line
+      process.stdout.write('^C\n');
+
+      // 2. Internal State Reset (CRITICAL FIX):
+      // We must forcefully clear the internal buffer and cursor.
+      // Casting to 'any' is necessary because TS types mark these as readonly,
+      // but in Node.js runtime they are writable and essential for this reset.
+      (rl as any).line = '';
+      (rl as any).cursor = 0;
+
+      // 3. Show new prompt
+      rl.prompt();
+      return;
+    }
+
+    // If line is empty, this is an exit attempt
+    const timeSinceLastSigint = now - lastSigintTime;
+    lastSigintTime = now;
+
+    if (timeSinceLastSigint < 2000) {
+      // Double press - exit immediately
+      console.log('\n[Client] Exiting...');
+      cleanupAndExit(0);
+    } else {
+      // First press - show exit hint
+      console.log('\n[Client] Press Ctrl+C again or type "exit" to quit');
+      rl.prompt();
+    }
   });
 }
 
-// MCP task execution function
-async function runMcpTask(params: CleanedParameters) {
+// Resource to tool mapping
+const TOOL_MAPPING: Record<string, string> = {
+  'cluster': 'list_cluster_by_ns',
+  'devbox': 'list_devbox_by_ns',
+  'pods': 'list_pods_by_ns'
+};
+
+// Single MCP task execution (helper for parallel execution)
+async function executeSingleMcpTask(params: CleanedParameters): Promise<{resource: string, result?: any, error?: string}> {
   console.error(`\n[Client] Executing: ${params.namespace} ${params.resource} ${params.identifier}`);
 
-  return new Promise<void>((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     // Start MCP Server process
     const server = spawn('npm', ['run', 'start:server'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: true
+    });
+
+    // Track the server process
+    activeMcpServers.add(server);
+
+    // Remove from tracking when the process exits
+    server.on('exit', () => {
+      activeMcpServers.delete(server);
     });
 
     let responseData = '';
@@ -111,7 +201,10 @@ async function runMcpTask(params: CleanedParameters) {
       if (!hasResponded) {
         hasResponded = true;
         server.kill();
-        reject(new Error('Request timeout after 30 seconds'));
+        resolve({
+          resource: params.resource,
+          error: `Request timeout after 30 seconds`
+        });
       }
     }, 30000);
 
@@ -135,7 +228,10 @@ async function runMcpTask(params: CleanedParameters) {
                 hasResponded = true;
                 clearTimeout(timeout);
                 server.kill();
-                reject(new Error(`Server returned error: ${response.error.message || 'Unknown error'}`));
+                resolve({
+                  resource: params.resource,
+                  error: `Server returned error: ${response.error.message || 'Unknown error'}`
+                });
                 return;
               }
 
@@ -145,9 +241,11 @@ async function runMcpTask(params: CleanedParameters) {
                 clearTimeout(timeout);
                 server.kill();
 
-                // Display results
-                displayResults(response.result);
-                resolve();
+                // Return result with resource type
+                resolve({
+                  resource: params.resource,
+                  result: response.result
+                });
                 return;
               }
             } catch (parseError) {
@@ -171,7 +269,10 @@ async function runMcpTask(params: CleanedParameters) {
       if (!hasResponded) {
         hasResponded = true;
         clearTimeout(timeout);
-        reject(error);
+        resolve({
+          resource: params.resource,
+          error: error.message || 'Unknown error'
+        });
       }
     });
 
@@ -180,18 +281,22 @@ async function runMcpTask(params: CleanedParameters) {
         hasResponded = true;
         clearTimeout(timeout);
         if (code !== 0) {
-          reject(new Error(`Server exited with code ${code}`));
+          resolve({
+            resource: params.resource,
+            error: `Server exited with code ${code}`
+          });
         } else {
-          resolve();
+          resolve({
+            resource: params.resource,
+            result: null
+          });
         }
       }
     });
 
     // Send request
     try {
-      const toolName = params.resource === 'cluster' ? 'list_cluster_by_ns'
-                     : params.resource === 'devbox' ? 'list_devbox_by_ns'
-                     : 'list_pods_by_ns';
+      const toolName = TOOL_MAPPING[params.resource] || 'list_pods_by_ns';
       const request = {
         jsonrpc: '2.0',
         id: Date.now(),
@@ -211,10 +316,192 @@ async function runMcpTask(params: CleanedParameters) {
         hasResponded = true;
         clearTimeout(timeout);
         server.kill();
-        reject(error);
+        resolve({
+          resource: params.resource,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
     }
   });
+}
+
+// MCP task execution function (parallel)
+async function runMcpTask(paramsList: CleanedParameters[]): Promise<Array<{resource: string, result?: any, error?: string}>> {
+  console.error(`\n[Client] Executing ${paramsList.length} parallel queries`);
+
+  const promises = paramsList.map(params => executeSingleMcpTask(params));
+
+  try {
+    const results = await Promise.all(promises);
+    return results;
+  } catch (error) {
+    console.error('[Client] Error in parallel execution:', error);
+    throw error;
+  }
+}
+
+// Legacy single execution function (backward compatibility)
+async function runMcpTaskLegacy(params: CleanedParameters): Promise<void> {
+  const result = await executeSingleMcpTask(params);
+
+  if (result.error) {
+    throw new Error(result.error);
+  }
+
+  if (result.result) {
+    displayResults(result.result);
+  }
+}
+
+// Aggregated results display function for multi-resource queries
+function displayAggregatedResults(results: Array<{resource: string, result?: any, error?: string}>) {
+  // Define priority order for display
+  const priority: Record<string, number> = { cluster: 1, devbox: 2, pods: 3 };
+
+  // Sort results by priority
+  const sortedResults = results.sort((a, b) => {
+    const priorityA = priority[a.resource] || 999;
+    const priorityB = priority[b.resource] || 999;
+    return priorityA - priorityB;
+  });
+
+  console.log('\n' + '='.repeat(60));
+  console.log('🔍 MULTI-RESOURCE QUERY RESULTS');
+  console.log('='.repeat(60));
+
+  let totalFound = 0;
+
+  for (const { resource, result, error } of sortedResults) {
+    if (error) {
+      console.log(`\n❌ ${resource.toUpperCase()} Error: ${error}`);
+      continue;
+    }
+
+    if (!result) {
+      console.log(`\n📋 ${resource.toUpperCase()}: No data found`);
+      continue;
+    }
+
+    // Use existing displayResults logic for each resource
+    console.log(`\n` + '-'.repeat(40));
+    console.log(`📊 ${resource.toUpperCase()} RESULTS`);
+    console.log('-'.repeat(40));
+
+    try {
+      // Check for content array (MCP format)
+      if (result && result.content && result.content.length > 0) {
+        const textContent = result.content[0].text;
+        const data = JSON.parse(textContent);
+
+        // 1. Cluster List Rendering
+        if (data.clusters && Array.isArray(data.clusters)) {
+          console.log(`🗄️  Found ${data.total || data.clusters.length} clusters (databases) in namespace: ${data.namespace}`);
+
+          const tableData = data.clusters.map((c: any) => ({
+            Name: c.name,
+            Type: c.type,
+            Status: c.status,
+            Version: c.version
+          }));
+
+          console.table(tableData);
+          totalFound += data.clusters.length;
+          continue;
+        }
+
+        // 2. Devbox List Rendering
+        if (data.devboxes && Array.isArray(data.devboxes)) {
+          console.log(`📦 Found ${data.total || data.devboxes.length} devboxes in namespace: ${data.namespace}`);
+
+          const tableData = data.devboxes.map((d: any) => ({
+            Name: d.name,
+            Status: d.status,
+            Network: JSON.stringify(d.network || {})
+          }));
+
+          console.table(tableData);
+          totalFound += data.devboxes.length;
+          continue;
+        }
+
+        // 3. Pod List Rendering
+        if (data.pods && Array.isArray(data.pods)) {
+          console.log(`🚀 Found ${data.total || data.pods.length} pods in namespace: ${data.namespace}`);
+
+          const tableData = data.pods.map((p: any) => ({
+            Name: p.name,
+            Status: p.status,
+            IP: p.ip,
+            Node: p.node
+          }));
+
+          console.table(tableData);
+          totalFound += data.pods.length;
+          continue;
+        }
+
+        // 4. Error Handling
+        if (data.success === false) {
+          console.error(`❌ Operation Failed: ${data.error?.message || data.error || 'Unknown error'}`);
+          if (data.error?.details) {
+            console.error('Details:', JSON.stringify(data.error.details, null, 2));
+          }
+          continue;
+        }
+
+        // 5. Fallback
+        console.log('📝 Raw Result:');
+        console.log(JSON.stringify(data, null, 2));
+        continue;
+      }
+
+      // Legacy format support (result.data)
+      if (result && result.data) {
+        const { type, data } = result.data;
+
+        switch (type) {
+          case 'log':
+            console.log('📋 Logs:');
+            console.log(data.content || data);
+            break;
+          case 'event':
+            console.log('⚡ Events:');
+            console.table(data);
+            break;
+          case 'yaml':
+            console.log('📄 YAML Configuration:');
+            console.log('```yaml');
+            console.log(data);
+            console.log('```');
+            break;
+          case 'resource_info':
+            console.log('💡 Resource Information:');
+            console.log(data);
+            break;
+          case 'error':
+            console.error('❌ Error:', data);
+            break;
+          default:
+            console.log('📊 Result:');
+            console.log(JSON.stringify(data, null, 2));
+        }
+        continue;
+      }
+
+      // Fallback for other formats
+      console.error('No valid content in response');
+      console.log('Raw response:', JSON.stringify(result, null, 2));
+
+    } catch (parseError) {
+      console.error(`❌ Failed to parse ${resource} result:`, parseError);
+      console.log('Raw response:', JSON.stringify(result, null, 2));
+    }
+  }
+
+  // Summary
+  console.log('\n' + '='.repeat(60));
+  console.log(`📋 SUMMARY: ${totalFound} total resources found across ${sortedResults.length} resource types`);
+  console.log('='.repeat(60));
 }
 
 // Result display function (reuse existing logic)
