@@ -1,0 +1,25 @@
+{
+  "name": "sealos-sre-agent",
+  "version": "2.0.0",
+  "description": "Sealos SRE Agent with MCP protocol support",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start:server": "ts-node src/server/index.ts",
+    "start:client": "ts-node src/client/index.ts",
+    "dev": "tsc --watch"
+  },
+  "keywords": ["sealos", "sre", "kubernetes", "mcp"],
+  "author": "Sealos SRE Team",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@kubernetes/client-node": "^0.20.0",
+    "zod": "^3.22.4",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  }
+}

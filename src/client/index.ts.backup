@@ -1,0 +1,206 @@
+import { spawn, ChildProcess } from 'child_process';
+import { config } from 'dotenv';
+import { AIService, CleanedParameters } from './ai/ai-service';
+import { McpToolCall, McpResponse, PodDisplayData, ParsedMcpResponse } from './types';
+
+// Load environment variables
+config();
+
+/**
+ * Parse MCP protocol response to extract nested data
+ */
+function parseMcpResponse(parsed: any): ParsedMcpResponse | null {
+  try {
+    // Extract text content from MCP response
+    const contentText = parsed.result?.content?.[0]?.text;
+    if (!contentText) {
+      return null;
+    }
+
+    // Parse nested JSON string
+    const resultData = JSON.parse(contentText);
+    return resultData;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Display pods as a formatted table
+ */
+function displayPodsAsTable(pods: PodDisplayData[], namespace: string, total: number): void {
+  console.log(`\n🚀 Found ${total} pods in namespace: ${namespace}`);
+  console.log('='.repeat(50));
+
+  // Format table data
+  const tableData = pods.map((pod) => ({
+    Name: pod.name,
+    Status: pod.status,
+    IP: pod.ip || 'Pending',
+    Node: pod.node || 'Pending'
+  }));
+
+  console.table(tableData);
+}
+
+/**
+ * Display error information
+ */
+function displayError(error: any): void {
+  console.log('\n❌ Operation failed:');
+  if (typeof error === 'string') {
+    console.error(error);
+  } else if (error?.message) {
+    console.error(error.message);
+  } else {
+    console.error('Unknown error occurred');
+  }
+}
+
+async function main() {
+  let serverProcess: ChildProcess | null = null;
+  const aiService = new AIService();
+
+  try {
+    // 1. 接收命令行参数
+    const rawArgs = process.argv.slice(2);
+    console.log('[Client] Raw input parameters:', rawArgs);
+
+    // 2. AI 三参数清洗
+    console.log('[AI] Cleaning parameters...');
+    const cleanedParams = await aiService.parseRawInput(rawArgs);
+
+    if (!cleanedParams) {
+      console.error('[AI] Failed to clean parameters or missing required parameters');
+      console.error('[AI] Required: 3 parameters [identifier, resource, namespace]');
+      console.error('[AI] Example: node dist/client/index.js hzh pods ns-mh69tey1');
+      process.exit(1);
+    }
+
+    console.log('[AI] Cleaned parameters:', JSON.stringify(cleanedParams, null, 2));
+
+    // 3. 启动 Server 进程
+    console.log('[Client] Starting MCP Server...');
+    serverProcess = spawn('npm', ['run', 'start:server'], {
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+
+    let responseReceived = false;
+    let fullResponse = '';
+
+    // 4. 处理 Server 输出
+    serverProcess.stdout?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      fullResponse += chunk;
+
+      // 检查是否收到完整的 JSON-RPC 响应
+      try {
+        const lines = fullResponse.split('\n').filter(line => line.trim());
+        for (const line of lines) {
+          if (line.includes('"result"') || line.includes('"error"')) {
+            const parsed = JSON.parse(line);
+            if (parsed.id === 1) { // 匹配我们的请求ID
+              responseReceived = true;
+              console.log('\n[Client] ===== FINAL RESULT =====');
+
+              try {
+                // 提取 MCP 协议包裹的文本内容
+                const resultData = parseMcpResponse(parsed);
+
+                if (resultData && resultData.success && resultData.pods) {
+                  displayPodsAsTable(resultData.pods, resultData.namespace!, resultData.total!);
+                } else {
+                  displayError(resultData?.error || 'Operation failed');
+                }
+              } catch (e) {
+                console.log('⚠️  Failed to parse response, showing raw data:');
+                console.log('Raw Args:', rawArgs);
+                console.log('Cleaned Parameters:', JSON.stringify(cleanedParams, null, 2));
+                console.log('Server Response:', JSON.stringify(parsed, null, 2));
+              }
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        // JSON 解析失败，继续累积
+      }
+    });
+
+    // 5. 处理进程错误
+    serverProcess.on('error', (error: Error) => {
+      console.error('[Client] Server process error:', error);
+    });
+
+    serverProcess.on('exit', (code: number | null, signal: string | null) => {
+      console.log(`[Client] Server process exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`);
+    });
+
+    // 6. 等待 Server 就绪并发送请求
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    console.log('[Client] Sending request to server...');
+    const jsonRpcRequest = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'list_pods_by_ns',
+        arguments: { namespace: cleanedParams.namespace }
+      },
+    };
+
+    serverProcess.stdin?.write(JSON.stringify(jsonRpcRequest) + '\n');
+
+    // 7. 等待响应 (保持现有逻辑)
+    const maxWaitTime = 15000; // 15秒最大等待时间
+    const startTime = Date.now();
+
+    while (!responseReceived && (Date.now() - startTime) < maxWaitTime) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    if (!responseReceived) {
+      console.log('\n[Client] ===== TIMEOUT =====');
+      console.log('No response received within timeout period');
+      console.log('Raw server output:', fullResponse);
+    }
+
+  } catch (error) {
+    console.error('[Client] Error occurred:', error);
+  } finally {
+    // 8. 优雅关闭 (保持现有逻辑)
+    console.log('[Client] Shutting down gracefully...');
+
+    if (serverProcess) {
+      // 给 Server 时间完成输出
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // 优雅关闭
+      serverProcess.kill('SIGTERM');
+
+      // 等待进程真正退出
+      await new Promise<void>(resolve => {
+        if (serverProcess) {
+          serverProcess.on('exit', resolve);
+        } else {
+          resolve();
+        }
+      });
+    }
+
+    console.log('[Client] Shutdown complete');
+    process.exit(0);
+  }
+}
+
+// Handle process termination
+process.on('SIGINT', () => {
+  console.log('\n[Client] Shutting down...');
+  process.exit(0);
+});
+
+main().catch((error) => {
+  console.error('[Client] Fatal error:', error);
+  process.exit(1);
+});
