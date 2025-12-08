@@ -7,6 +7,10 @@ node_modules/
 .env.local
 .env.production
 
+# Kubernetes config files (sensitive)
+kubeconfig/
+*.kubeconfig
+
 # Build outputs
 dist/
 build/
