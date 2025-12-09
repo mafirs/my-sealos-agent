@@ -103,10 +103,9 @@ async function main() {
       const cleanedParamsList = await aiService.parseRawInput(rawArgs);
 
       if (!cleanedParamsList || cleanedParamsList.length === 0) {
-        console.error('❌ Invalid input. Please provide at least 2 parameters: namespace, [resources], identifier');
+        console.error('❌ Invalid input. Please provide at least: [namespace, resource, identifier] OR [resource, identifier] for nodes');
         console.error('   Examples: ns-mh69tey1 pods hzh');
-        console.error('             ns-mh69tey1 pods devbox cluster ingress hzh');
-        console.error('             ns-mh69tey1 hzh (defaults to pods)');
+        console.error('             node hzh');
         rl.prompt();
         return;
       }

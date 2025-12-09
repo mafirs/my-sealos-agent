@@ -117,7 +117,7 @@ export const LIST_INGRESS_BY_NS_TOOL = {
 
 // Schema for list_nodes tool
 export const ListNodesInputSchema = z.object({
-  namespace: z.string().min(1, 'Namespace is required'),
+  namespace: z.string().optional(),
 });
 
 export type ListNodesInput = z.infer<typeof ListNodesInputSchema>;
@@ -134,7 +134,7 @@ export const LIST_NODES_TOOL = {
         description: 'Ignored for cluster-level resources',
       },
     },
-    required: ['namespace'],
+    required: [],
   },
 };
 
