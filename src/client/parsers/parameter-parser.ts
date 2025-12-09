@@ -76,7 +76,7 @@ export function parseUnorderedParameters(rawArgs: string[]): ParseResult {
     }
 
     // Validate using Zod schema
-    const validatedParams = ParameterSchema.parse(params);
+    ParameterSchema.parse(params);
 
     // Generate the command
     const command = `kubectl get pods -n ${finalNamespace}`;

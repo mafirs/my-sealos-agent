@@ -4,10 +4,12 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { LIST_PODS_BY_NS_TOOL, LIST_DEVBOX_BY_NS_TOOL, LIST_CLUSTER_BY_NS_TOOL } from './tools/types';
+import { LIST_PODS_BY_NS_TOOL, LIST_DEVBOX_BY_NS_TOOL, LIST_CLUSTER_BY_NS_TOOL, LIST_QUOTA_BY_NS_TOOL, LIST_INGRESS_BY_NS_TOOL } from './tools/types';
 import { listPodsByNamespace } from './tools/list-pods-by-ns';
 import { listDevboxByNamespace } from './tools/list-devbox-by-ns';
 import { listClusterByNamespace } from './tools/list-cluster-by-ns';
+import { listQuotaByNamespace } from './tools/list-quota-by-ns';
+import { listIngressByNamespace } from './tools/list-ingress-by-ns';
 import { kubernetesClient } from './kubernetes/client';
 
 async function main() {
@@ -38,7 +40,7 @@ async function main() {
   // Register tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
-      tools: [LIST_PODS_BY_NS_TOOL, LIST_DEVBOX_BY_NS_TOOL, LIST_CLUSTER_BY_NS_TOOL],
+      tools: [LIST_PODS_BY_NS_TOOL, LIST_DEVBOX_BY_NS_TOOL, LIST_CLUSTER_BY_NS_TOOL, LIST_QUOTA_BY_NS_TOOL, LIST_INGRESS_BY_NS_TOOL],
     };
   });
 
@@ -77,6 +79,28 @@ async function main() {
               {
                 type: 'text',
                 text: JSON.stringify(clusterResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_quota_by_ns':
+          const quotaResult = await listQuotaByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(quotaResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_ingress_by_ns':
+          const ingressResult = await listIngressByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(ingressResult, null, 2),
               },
             ],
           };

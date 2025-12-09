@@ -5,6 +5,7 @@ export class KubernetesClient {
   private kc: k8s.KubeConfig;
   private k8sApi: k8s.CoreV1Api;
   private customObjectsApi: k8s.CustomObjectsApi;
+  private networkingV1Api: k8s.NetworkingV1Api;
 
   constructor(kubeconfigPath?: string) {
     this.kc = new k8s.KubeConfig();
@@ -19,6 +20,7 @@ export class KubernetesClient {
 
     this.k8sApi = this.kc.makeApiClient(k8s.CoreV1Api);
     this.customObjectsApi = this.kc.makeApiClient(k8s.CustomObjectsApi);
+    this.networkingV1Api = this.kc.makeApiClient(k8s.NetworkingV1Api);
   }
 
   /**
@@ -33,6 +35,13 @@ export class KubernetesClient {
    */
   getCustomObjectsApi(): k8s.CustomObjectsApi {
     return this.customObjectsApi;
+  }
+
+  /**
+   * Get the Networking V1 API client for Ingress resources
+   */
+  getNetworkingV1Api(): k8s.NetworkingV1Api {
+    return this.networkingV1Api;
   }
 
   /**

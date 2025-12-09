@@ -105,7 +105,7 @@ async function main() {
       if (!cleanedParamsList || cleanedParamsList.length === 0) {
         console.error('❌ Invalid input. Please provide at least 2 parameters: namespace, [resources], identifier');
         console.error('   Examples: ns-mh69tey1 pods hzh');
-        console.error('             ns-mh69tey1 pods devbox cluster hzh');
+        console.error('             ns-mh69tey1 pods devbox cluster ingress hzh');
         console.error('             ns-mh69tey1 hzh (defaults to pods)');
         rl.prompt();
         return;
@@ -171,14 +171,16 @@ async function main() {
 const TOOL_MAPPING: Record<string, string> = {
   'cluster': 'list_cluster_by_ns',
   'devbox': 'list_devbox_by_ns',
-  'pods': 'list_pods_by_ns'
+  'pods': 'list_pods_by_ns',
+  'ingress': 'list_ingress_by_ns',
+  'quota': 'list_quota_by_ns'
 };
 
 // Single MCP task execution (helper for parallel execution)
 async function executeSingleMcpTask(params: CleanedParameters): Promise<{resource: string, result?: any, error?: string}> {
   console.error(`\n[Client] Executing: ${params.namespace} ${params.resource} ${params.identifier}`);
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     // Start MCP Server process
     const server = spawn('npm', ['run', 'start:server'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -356,7 +358,7 @@ async function runMcpTaskLegacy(params: CleanedParameters): Promise<void> {
 // Aggregated results display function for multi-resource queries
 function displayAggregatedResults(results: Array<{resource: string, result?: any, error?: string}>) {
   // Define priority order for display
-  const priority: Record<string, number> = { cluster: 1, devbox: 2, pods: 3 };
+  const priority: Record<string, number> = { cluster: 1, devbox: 2, pods: 3, ingress: 4, quota: 5 };
 
   // Sort results by priority
   const sortedResults = results.sort((a, b) => {
@@ -440,7 +442,39 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
           continue;
         }
 
-        // 4. Error Handling
+        // 4. Quota List Rendering
+        if (data.quotas && Array.isArray(data.quotas)) {
+          console.log(`\n⚖️  Found ${data.total || data.quotas.length} resource quotas in namespace: ${data.namespace}`);
+
+          // Iterate through each quota and display as transposed table
+          data.quotas.forEach((q: any) => {
+            console.log(`\n📌 Quota: ${q.name}`);
+
+            // Parse details string: "cpu: 100m/1, memory: 1Gi/2Gi"
+            const resources = q.details.split(', ').map((item: string) => {
+              const [key, value] = item.split(': ');
+              const [used, limit] = value ? value.split('/') : ['-', '-'];
+              return {
+                Resource: key,
+                Used: used,
+                Limit: limit
+              };
+            }).sort((a: any, b: any) => a.Resource.localeCompare(b.Resource));
+
+            console.table(resources);
+          });
+          totalFound += data.quotas.length;
+          continue;
+        }
+
+        // 5. Ingress List Rendering
+        if (data.ingresses && Array.isArray(data.ingresses)) {
+          displayIngressAsHybridRows(data.ingresses, data.namespace, data.total || data.ingresses.length);
+          totalFound += data.ingresses.length;
+          continue;
+        }
+
+        // 6. Error Handling
         if (data.success === false) {
           console.error(`❌ Operation Failed: ${data.error?.message || data.error || 'Unknown error'}`);
           if (data.error?.details) {
@@ -504,6 +538,34 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
   console.log('='.repeat(60));
 }
 
+// Helper function for displaying Ingress resources in hybrid row format
+function displayIngressAsHybridRows(ingresses: any[], namespace: string, total: number): void {
+  console.log(`\n🌐 Found ${total || ingresses.length} ingresses in namespace: ${namespace}`);
+  console.log('─'.repeat(60));
+
+  ingresses.forEach((item: any, index: number) => {
+    // Header line with index and metadata
+    const nameStr = `[${index}] ${item.name}`;
+    const metaStr = `(Class: ${item.ingressClass || item.class || '-'} | Address: ${item.address || '-'})`;
+    console.log(`${nameStr.padEnd(30)} ${metaStr}`);
+
+    // Body lines with tree structure
+    const backend = item.backendService
+      ? `${item.backendService}:${item.backendPort}`
+      : (item.backend || '-');
+
+    console.log(`    ├─ Hosts:   ${item.hosts || '-'}`);
+    console.log(`    ├─ Paths:   ${item.paths || '-'}`);
+    console.log(`    ├─ Backend: ${backend}`);
+    console.log(`    └─ Ports:   ${item.ports || '-'}`);
+
+    // Empty line for better spacing
+    console.log('');
+  });
+
+  console.log('─'.repeat(60));
+}
+
 // Result display function (reuse existing logic)
 function displayResults(result: any) {
   // Check for content array (MCP format)
@@ -557,7 +619,37 @@ function displayResults(result: any) {
         return; // Exit immediately after rendering, no JSON dump
       }
 
-      // 2. ❌ Error Handling
+      // 3. ✅ Quota List Rendering (Beautiful display)
+      if (data.quotas && Array.isArray(data.quotas)) {
+        console.log(`\n⚖️  Found ${data.total} resource quotas in namespace: ${data.namespace}`);
+
+        // Iterate through each quota and display as transposed table
+        data.quotas.forEach((q: any) => {
+          console.log(`\n📌 Quota: ${q.name}`);
+
+          // Parse details string: "cpu: 100m/1, memory: 1Gi/2Gi"
+          const resources = q.details.split(', ').map((item: string) => {
+            const [key, value] = item.split(': ');
+            const [used, limit] = value ? value.split('/') : ['-', '-'];
+            return {
+              Resource: key,
+              Used: used,
+              Limit: limit
+            };
+          }).sort((a: any, b: any) => a.Resource.localeCompare(b.Resource));
+
+          console.table(resources);
+        });
+        return; // Exit immediately after rendering, no JSON dump
+      }
+
+      // 4. ✅ Ingress List Rendering (Hybrid row display)
+      if (data.ingresses && Array.isArray(data.ingresses)) {
+        displayIngressAsHybridRows(data.ingresses, data.namespace, data.total || data.ingresses.length);
+        return; // Exit immediately after rendering, no JSON dump
+      }
+
+      // 5. ❌ Error Handling
       if (data.success === false) {
         console.error(`\n❌ Operation Failed: ${data.error?.message || data.error || 'Unknown error'}`);
         if (data.error?.details) {

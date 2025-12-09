@@ -68,3 +68,49 @@ export const LIST_CLUSTER_BY_NS_TOOL = {
     required: ['namespace'],
   },
 };
+
+// Schema for list_quota_by_ns tool
+export const ListQuotaByNsInputSchema = z.object({
+  namespace: z.string().min(1, 'Namespace is required'),
+});
+
+export type ListQuotaByNsInput = z.infer<typeof ListQuotaByNsInputSchema>;
+
+// Quota tool definitions for MCP
+export const LIST_QUOTA_BY_NS_TOOL = {
+  name: 'list_quota_by_ns',
+  description: 'List resource quotas in a specific namespace',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      namespace: {
+        type: 'string',
+        description: 'The namespace to list quotas from',
+      },
+    },
+    required: ['namespace'],
+  },
+};
+
+// Schema for list_ingress_by_ns tool
+export const ListIngressByNsInputSchema = z.object({
+  namespace: z.string().min(1, 'Namespace is required'),
+});
+
+export type ListIngressByNsInput = z.infer<typeof ListIngressByNsInputSchema>;
+
+// Ingress tool definitions for MCP
+export const LIST_INGRESS_BY_NS_TOOL = {
+  name: 'list_ingress_by_ns',
+  description: 'List Ingress resources in a specific namespace',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      namespace: {
+        type: 'string',
+        description: 'The namespace to list Ingress resources from',
+      },
+    },
+    required: ['namespace'],
+  },
+};

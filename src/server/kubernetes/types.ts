@@ -22,6 +22,40 @@ export interface ListPodsResponse {
   success: boolean;
 }
 
+export interface QuotaInfo {
+  name: string;
+  namespace: string;
+  details: string;
+}
+
+export interface ListQuotaResponse {
+  namespace: string;
+  quotas: QuotaInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
+export interface IngressInfo {
+  name: string;
+  namespace: string;
+  hosts: string;
+  paths: string;
+  backendService: string;
+  backendPort: string;
+  ingressClass?: string;
+  address?: string;
+  age?: string;
+}
+
+export interface ListIngressResponse {
+  namespace: string;
+  ingresses: IngressInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
 export interface KubeConfigInfo {
   cluster: string;
   user: string;

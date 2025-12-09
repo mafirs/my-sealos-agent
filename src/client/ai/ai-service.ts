@@ -74,26 +74,26 @@ export class AIService {
 
 核心逻辑：
 1. 提取公共参数：namespace (ns-开头), identifier (标识符)
-2. 识别资源列表：在输入中查找 ["pods", "devbox", "cluster"]，忽略大小写
+2. 识别资源列表：在输入中查找 ["pods", "devbox", "cluster", "ingress", "quota"]，忽略大小写
 3. 自动去重（例如输入两个 devbox 只算一个）
 4. 如果完全没有发现资源关键词，默认添加 "pods"
 5. 笛卡尔积生成：为每一个识别到的资源类型，生成一个独立的对象，共享 namespace 和 identifier
 
 规则：
 - identifier: 固定值 "hzh" 或从输入中提取的标识符
-- resource: 枚举值 "pods" | "devbox" | "cluster"，支持识别多个资源
+- resource: 枚举值 "pods" | "devbox" | "cluster" | "ingress" | "quota"，支持识别多个资源
 - namespace: 以 "ns-" 开头的字符串，如 "ns-mh69tey1"
 
 输入示例：
 - ["hzh", "pods", "ns-mh69tey1"] -> [{"namespace":"ns-mh69tey1","resource":"pods","identifier":"hzh"}]
 - ["ns-mh69tey1", "devbox", "cluster", "hzh"] -> [{"namespace":"ns-mh69tey1","resource":"devbox","identifier":"hzh"},{"namespace":"ns-mh69tey1","resource":"cluster","identifier":"hzh"}]
-- ["ns-m1", "pods", "devbox", "cluster", "hzh"] -> [{"namespace":"ns-m1","resource":"pods","identifier":"hzh"},{"namespace":"ns-m1","resource":"devbox","identifier":"hzh"},{"namespace":"ns-m1","resource":"cluster","identifier":"hzh"}]
+- ["ns-m1", "pods", "devbox", "cluster", "ingress", "quota", "hzh"] -> [{"namespace":"ns-m1","resource":"pods","identifier":"hzh"},{"namespace":"ns-m1","resource":"devbox","identifier":"hzh"},{"namespace":"ns-m1","resource":"cluster","identifier":"hzh"},{"namespace":"ns-m1","resource":"ingress","identifier":"hzh"},{"namespace":"ns-m1","resource":"quota","identifier":"hzh"}]
 - ["ns-m1", "hzh"] -> [{"namespace":"ns-m1","resource":"pods","identifier":"hzh"}]
 
 要求：
 1. 返回 JSON 数组，每个对象包含 namespace, resource, identifier 三个字段
 2. 如果缺少 namespace，返回 null
-3. 资源类型按优先级排序：cluster > devbox > pods
+3. 资源类型按优先级排序：cluster > devbox > pods > ingress > quota
 4. 自动去重，避免重复的资源类型
 5. 只返回纯 JSON 数组，不要包含 markdown 代码块`;
 
