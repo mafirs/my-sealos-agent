@@ -19,6 +19,9 @@ build/
 .vscode/
 .idea/
 
+# Local settings (may contain personal config)
+.claude/settings.local.json
+
 # OS files
 .DS_Store
 Thumbs.db
