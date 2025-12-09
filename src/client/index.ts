@@ -22,6 +22,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { CleanedParameters, AIService } from './ai/ai-service';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import * as Renderer from './renderers';
 
 // Global variables for process tracking
 let activeMcpServers = new Set<ChildProcess>();
@@ -58,6 +59,9 @@ function cleanupAndExit(code: number) {
 async function main() {
   // Initialize services
   const aiService = new AIService();
+
+  // Context memory for AI
+  let lastToolResult: any = null;
 
   // Create readline interface for REPL mode
   const rl = readline.createInterface({
@@ -100,7 +104,8 @@ async function main() {
 
       // AI cleaning parameters
       console.error('[AI] Processing input...');
-      const cleanedParamsList = await aiService.parseRawInput(rawArgs);
+      // Pass lastToolResult to AI
+      const cleanedParamsList = await aiService.parseRawInput(rawArgs, lastToolResult);
 
       if (!cleanedParamsList || cleanedParamsList.length === 0) {
         console.error('❌ Invalid input. Please provide at least: [namespace, resource, identifier] OR [resource, identifier] for nodes');
@@ -113,11 +118,26 @@ async function main() {
       // Execute MCP tasks (parallel or single based on array length)
       if (cleanedParamsList.length === 1) {
         // Single resource - use legacy function for backward compatibility
-        await runMcpTaskLegacy(cleanedParamsList[0]);
+        const resultRaw = await runMcpTaskLegacy(cleanedParamsList[0]);
+        // 构造一致的上下文格式
+        lastToolResult = [{
+          resource: cleanedParamsList[0].resource,
+          data: tryParseJson(resultRaw.result?.content?.[0]?.text),
+          error: resultRaw.error
+        }];
       } else {
         // Multiple resources - use parallel execution
         console.error(`[Client] Querying ${cleanedParamsList.length} resource types in parallel...`);
         const results = await runMcpTask(cleanedParamsList);
+
+        // 保存上下文，仅保留必要字段
+        lastToolResult = results.map(r => ({
+          resource: r.resource,
+          // 尝试解析 JSON 字符串，如果解析失败则保留原文本
+          data: tryParseJson(r.result?.content?.[0]?.text),
+          error: r.error
+        }));
+
         displayAggregatedResults(results);
       }
 
@@ -347,7 +367,7 @@ async function runMcpTask(paramsList: CleanedParameters[]): Promise<Array<{resou
 }
 
 // Legacy single execution function (backward compatibility)
-async function runMcpTaskLegacy(params: CleanedParameters): Promise<void> {
+async function runMcpTaskLegacy(params: CleanedParameters): Promise<any> {
   const result = await executeSingleMcpTask(params);
 
   if (result.error) {
@@ -357,6 +377,8 @@ async function runMcpTaskLegacy(params: CleanedParameters): Promise<void> {
   if (result.result) {
     displayResults(result.result);
   }
+
+  return result;
 }
 
 // Aggregated results display function for multi-resource queries
@@ -401,114 +423,70 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
 
         // 1. Cluster List Rendering
         if (data.clusters && Array.isArray(data.clusters)) {
-          console.log(`🗄️  Found ${data.total || data.clusters.length} clusters (databases) in namespace: ${data.namespace}`);
-
-          const tableData = data.clusters.map((c: any) => ({
-            Name: c.name,
-            Type: c.type,
-            Status: c.status,
-            Version: c.version
-          }));
-
-          console.table(tableData);
+          Renderer.displayClustersAsTable(data.clusters, data.namespace, data.total || data.clusters.length);
           totalFound += data.clusters.length;
           continue;
         }
 
         // 2. Devbox List Rendering
         if (data.devboxes && Array.isArray(data.devboxes)) {
-          console.log(`📦 Found ${data.total || data.devboxes.length} devboxes in namespace: ${data.namespace}`);
-
-          const tableData = data.devboxes.map((d: any) => ({
-            Name: d.name,
-            Status: d.status,
-            Network: JSON.stringify(d.network || {})
-          }));
-
-          console.table(tableData);
+          Renderer.displayDevboxesAsTable(data.devboxes, data.namespace, data.total || data.devboxes.length);
           totalFound += data.devboxes.length;
           continue;
         }
 
         // 3. Pod List Rendering
         if (data.pods && Array.isArray(data.pods)) {
-          console.log(`🚀 Found ${data.total || data.pods.length} pods in namespace: ${data.namespace}`);
-
-          const tableData = data.pods.map((p: any) => ({
-            Name: p.name,
-            Status: p.status,
-            IP: p.ip,
-            Node: p.node
-          }));
-
-          console.table(tableData);
+          Renderer.displayPodsAsTable(data.pods, data.namespace, data.total || data.pods.length);
           totalFound += data.pods.length;
           continue;
         }
 
         // 4. Quota List Rendering
         if (data.quotas && Array.isArray(data.quotas)) {
-          console.log(`\n⚖️  Found ${data.total || data.quotas.length} resource quotas in namespace: ${data.namespace}`);
-
-          // Iterate through each quota and display as transposed table
-          data.quotas.forEach((q: any) => {
-            console.log(`\n📌 Quota: ${q.name}`);
-
-            // Parse details string: "cpu: 100m/1, memory: 1Gi/2Gi"
-            const resources = q.details.split(', ').map((item: string) => {
-              const [key, value] = item.split(': ');
-              const [used, limit] = value ? value.split('/') : ['-', '-'];
-              return {
-                Resource: key,
-                Used: used,
-                Limit: limit
-              };
-            }).sort((a: any, b: any) => a.Resource.localeCompare(b.Resource));
-
-            console.table(resources);
-          });
+          Renderer.displayQuotasAsTransposedTable(data.quotas, data.namespace, data.total || data.quotas.length);
           totalFound += data.quotas.length;
           continue;
         }
 
         // 5. Ingress List Rendering
         if (data.ingresses && Array.isArray(data.ingresses)) {
-          displayIngressAsHybridRows(data.ingresses, data.namespace, data.total || data.ingresses.length);
+          Renderer.displayIngressAsHybridRows(data.ingresses, data.namespace, data.total || data.ingresses.length);
           totalFound += data.ingresses.length;
           continue;
         }
 
         // 6. Node List Rendering
         if (data.nodes && Array.isArray(data.nodes)) {
-          displayNodesAsHybridRows(data.nodes);
+          Renderer.displayNodesAsHybridRows(data.nodes);
           totalFound += data.nodes.length;
           continue;
         }
 
         // 7. CronJob List Rendering
         if (data.cronjobs && Array.isArray(data.cronjobs)) {
-          displayCronjobsAsHybridRows(data.cronjobs, data.namespace, data.total || data.cronjobs.length);
+          Renderer.displayCronjobsAsHybridRows(data.cronjobs, data.namespace, data.total || data.cronjobs.length);
           totalFound += data.cronjobs.length;
           continue;
         }
 
         // 8. Event List Rendering
         if (data.events && Array.isArray(data.events)) {
-          displayEventsAsTimeline(data.events, data.namespace);
+          Renderer.displayEventsAsTimeline(data.events, data.namespace);
           totalFound += data.events.length;
           continue;
         }
 
         // 9. Account List Rendering
         if (data.accounts && Array.isArray(data.accounts)) {
-          displayAccountsAsNestedHybrid(data.accounts, data.namespace, data.total || data.accounts.length);
+          Renderer.displayAccountsAsNestedHybrid(data.accounts, data.namespace, data.total || data.accounts.length);
           totalFound += data.accounts.length;
           continue;
         }
 
         // 10. Debt List Rendering
         if (data.debts && Array.isArray(data.debts)) {
-          displayDebtsAsNestedHybrid(data.debts, data.namespace, data.total || data.debts.length);
+          Renderer.displayDebtsAsNestedHybrid(data.debts, data.namespace, data.total || data.debts.length);
           totalFound += data.debts.length;
           continue;
         }
@@ -577,150 +555,6 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
   console.log('='.repeat(60));
 }
 
-// Helper function for displaying Ingress resources in hybrid row format
-function displayIngressAsHybridRows(ingresses: any[], namespace: string, total: number): void {
-  console.log(`\n🌐 Found ${total || ingresses.length} ingresses in namespace: ${namespace}`);
-  console.log('─'.repeat(60));
-
-  ingresses.forEach((item: any, index: number) => {
-    // Header line with index and metadata
-    const nameStr = `[${index}] ${item.name}`;
-    const metaStr = `(Class: ${item.ingressClass || item.class || '-'} | Address: ${item.address || '-'})`;
-    console.log(`${nameStr.padEnd(30)} ${metaStr}`);
-
-    // Body lines with tree structure
-    const backend = item.backendService
-      ? `${item.backendService}:${item.backendPort}`
-      : (item.backend || '-');
-
-    console.log(`    ├─ Hosts:   ${item.hosts || '-'}`);
-    console.log(`    ├─ Paths:   ${item.paths || '-'}`);
-    console.log(`    ├─ Backend: ${backend}`);
-    console.log(`    └─ Ports:   ${item.ports || '-'}`);
-
-    // Empty line for better spacing
-    console.log('');
-  });
-
-  console.log('─'.repeat(60));
-}
-
-// Helper function for displaying Node resources in hybrid row format
-function displayNodesAsHybridRows(nodes: any[]): void {
-  console.log(`\n🖥️  Found ${nodes.length} cluster nodes`);
-  console.log('─'.repeat(60));
-
-  nodes.forEach((node: any, index: number) => {
-    const nameStr = `[${index}] ${node.name}`;
-    const metaStr = `(Roles: ${node.roles || 'worker'} | Status: ${node.status || 'Unknown'})`;
-    console.log(`${nameStr.padEnd(30)} ${metaStr}`);
-
-    console.log(`    ├─ IP:       ${node.ip || '-'}`);
-    console.log(`    ├─ OS Image: ${node.osImage || '-'}`);
-    console.log(`    └─ Age:      ${node.age || '-'}`);
-    console.log('');
-  });
-
-  console.log('─'.repeat(60));
-}
-
-// Helper function for displaying CronJob resources in hybrid row format
-function displayCronjobsAsHybridRows(cronjobs: any[], namespace: string, total: number): void {
-  console.log(`\n⏰ Found ${total} cronjobs in namespace: ${namespace}`);
-  console.log('─'.repeat(60));
-
-  cronjobs.forEach((cronjob: any, index: number) => {
-    const nameStr = `[${index}] ${cronjob.name}`;
-    const metaStr = `(Schedule: ${cronjob.schedule || 'No schedule'} | Active: ${cronjob.active || 0})`;
-    console.log(`${nameStr.padEnd(35)} ${metaStr}`);
-
-    console.log(`    ├─ Suspend:       ${cronjob.suspend ? 'Yes' : 'No'}`);
-    console.log(`    ├─ Last Schedule: ${cronjob.lastSchedule || 'Never'}`);
-    console.log(`    └─ Age:          ${cronjob.age || '-'}`);
-    console.log('');
-  });
-
-  console.log('─'.repeat(60));
-}
-
-// Helper function for displaying Events in compact timeline format
-function displayEventsAsTimeline(events: any[], namespace: string): void {
-  console.log(`\n🔔 Found ${events.length} events in namespace: ${namespace} (Showing last 100)`);
-  console.log('─'.repeat(80));
-
-  events.forEach((e: any) => {
-    const timeStr = e.lastTimestamp ? new Date(e.lastTimestamp).toLocaleTimeString() : 'Unknown Time';
-    const header = `[${timeStr}] ${e.type}/${e.reason} | ${e.object}`;
-
-    const prefix = e.type === 'Warning' ? '⚠️ ' : '  ';
-
-    console.log(`${prefix}${header}`);
-    console.log(`     └─ ${e.message}`);
-    console.log('');
-  });
-
-  console.log('─'.repeat(80));
-}
-
-// Helper function for displaying Account resources in nested hybrid format
-function displayAccountsAsNestedHybrid(accounts: any[], namespace: string, total: number): void {
-  console.log(`\n💰 Found ${total} accounts in namespace: ${namespace}`);
-  console.log('─'.repeat(60));
-
-  accounts.forEach((account: any, index: number) => {
-    const nameStr = `[${index}] ${account.name}`;
-    const status = account.status || {};
-    const metaStr = `(Type: ${status.type || 'Unknown'} | Balance: ${status.balance || 'N/A'})`;
-    console.log(`${nameStr.padEnd(35)} ${metaStr}`);
-
-    console.log(`    ├─ Created: ${status.creationTime || '-'}`);
-
-    // Display charge list if available
-    if (status.chargeList && status.chargeList.length > 0) {
-      console.log(`    └─ Charge List:`);
-      status.chargeList.forEach((charge: any, idx: number) => {
-        const isLast = idx === status.chargeList.length - 1;
-        const prefix = isLast ? '      └─' : '      ├─';
-        console.log(`${prefix} ${charge.type || 'Unknown'}: ${charge.amount || 0} ${charge.currency || ''}`);
-      });
-    } else {
-      console.log(`    └─ Charge List: No charges`);
-    }
-
-    console.log('');
-  });
-
-  console.log('─'.repeat(60));
-}
-
-// Helper function for displaying Debt resources in nested hybrid format
-function displayDebtsAsNestedHybrid(debts: any[], namespace: string, total: number): void {
-  console.log(`\n💳 Found ${total} debts in namespace: ${namespace}`);
-  console.log('─'.repeat(60));
-
-  debts.forEach((debt: any, index: number) => {
-    const nameStr = `[${index}] ${debt.name}`;
-    const status = debt.status || {};
-    const metaStr = `(Type: ${status.type || 'Unknown'} | Total: ${status.totalDebt || 0})`;
-    console.log(`${nameStr.padEnd(35)} ${metaStr}`);
-
-    // Display debt status records if available
-    if (status.debtStatusRecords && status.debtStatusRecords.length > 0) {
-      console.log(`    ├─ Debt Records:`);
-      status.debtStatusRecords.forEach((record: any, idx: number) => {
-        const isLast = idx === status.debtStatusRecords.length - 1;
-        const prefix = isLast ? '      └─' : '      ├─';
-        console.log(`${prefix} ${record.type || 'Unknown'}: ${record.amount || 0} (${record.status || 'Unknown'})`);
-      });
-    } else {
-      console.log(`    └─ Debt Records: No records`);
-    }
-
-    console.log('');
-  });
-
-  console.log('─'.repeat(60));
-}
 
 // Result display function (reuse existing logic)
 function displayResults(result: any) {
@@ -732,106 +566,61 @@ function displayResults(result: any) {
 
       // 1. ✅ Cluster List Rendering
       if (data.clusters && Array.isArray(data.clusters)) {
-        console.log(`\n🗄️  Found ${data.total} clusters (databases) in namespace: ${data.namespace}`);
-
-        const tableData = data.clusters.map((c: any) => ({
-          Name: c.name,
-          Type: c.type,      // Database type (Redis/MySQL/PostgreSQL...)
-          Status: c.status,
-          Version: c.version
-        }));
-
-        console.table(tableData);
+        Renderer.displayClustersAsTable(data.clusters, data.namespace, data.total);
         return; // Exit immediately after rendering, no JSON dump
       }
 
       // 2. ✅ Devbox List Rendering
       if (data.devboxes && Array.isArray(data.devboxes)) {
-        console.log(`\n📦 Found ${data.total} devboxes in namespace: ${data.namespace}`);
-
-        const tableData = data.devboxes.map((d: any) => ({
-          Name: d.name,
-          Status: d.status,
-          Network: JSON.stringify(d.network || {})
-        }));
-
-        console.table(tableData);
+        Renderer.displayDevboxesAsTable(data.devboxes, data.namespace, data.total);
         return; // Exit immediately after rendering, no JSON dump
       }
 
-      // 2. ✅ Pod List Rendering (Beautiful display)
+      // 3. ✅ Pod List Rendering (Beautiful display)
       if (data.pods && Array.isArray(data.pods)) {
-        console.log(`\n🚀 Found ${data.total} pods in namespace: ${data.namespace}`);
-
-        // Extract only core fields for clean table display
-        const tableData = data.pods.map((p: any) => ({
-          Name: p.name,
-          Status: p.status,
-          IP: p.ip,
-          Node: p.node
-        }));
-
-        console.table(tableData);
+        Renderer.displayPodsAsTable(data.pods, data.namespace, data.total);
         return; // Exit immediately after rendering, no JSON dump
       }
 
-      // 3. ✅ Quota List Rendering (Beautiful display)
+      // 4. ✅ Quota List Rendering (Beautiful display)
       if (data.quotas && Array.isArray(data.quotas)) {
-        console.log(`\n⚖️  Found ${data.total} resource quotas in namespace: ${data.namespace}`);
-
-        // Iterate through each quota and display as transposed table
-        data.quotas.forEach((q: any) => {
-          console.log(`\n📌 Quota: ${q.name}`);
-
-          // Parse details string: "cpu: 100m/1, memory: 1Gi/2Gi"
-          const resources = q.details.split(', ').map((item: string) => {
-            const [key, value] = item.split(': ');
-            const [used, limit] = value ? value.split('/') : ['-', '-'];
-            return {
-              Resource: key,
-              Used: used,
-              Limit: limit
-            };
-          }).sort((a: any, b: any) => a.Resource.localeCompare(b.Resource));
-
-          console.table(resources);
-        });
+        Renderer.displayQuotasAsTransposedTable(data.quotas, data.namespace, data.total);
         return; // Exit immediately after rendering, no JSON dump
       }
 
-      // 4. ✅ Ingress List Rendering (Hybrid row display)
+      // 5. ✅ Ingress List Rendering (Hybrid row display)
       if (data.ingresses && Array.isArray(data.ingresses)) {
-        displayIngressAsHybridRows(data.ingresses, data.namespace, data.total || data.ingresses.length);
+        Renderer.displayIngressAsHybridRows(data.ingresses, data.namespace, data.total || data.ingresses.length);
         return; // Exit immediately after rendering, no JSON dump
       }
 
-      // 5. ✅ Node List Rendering (Hybrid row display)
+      // 6. ✅ Node List Rendering (Hybrid row display)
       if (data.nodes && Array.isArray(data.nodes)) {
-        displayNodesAsHybridRows(data.nodes);
+        Renderer.displayNodesAsHybridRows(data.nodes);
         return;
       }
 
-      // 6. ✅ CronJob List Rendering (Hybrid row display)
+      // 7. ✅ CronJob List Rendering (Hybrid row display)
       if (data.cronjobs && Array.isArray(data.cronjobs)) {
-        displayCronjobsAsHybridRows(data.cronjobs, data.namespace, data.total || data.cronjobs.length);
+        Renderer.displayCronjobsAsHybridRows(data.cronjobs, data.namespace, data.total || data.cronjobs.length);
         return;
       }
 
-      // 7. ✅ Event List Rendering (Timeline display)
+      // 8. ✅ Event List Rendering (Timeline display)
       if (data.events && Array.isArray(data.events)) {
-        displayEventsAsTimeline(data.events, data.namespace);
+        Renderer.displayEventsAsTimeline(data.events, data.namespace);
         return;
       }
 
-      // 8. ✅ Account List Rendering (Nested hybrid display)
+      // 9. ✅ Account List Rendering (Nested hybrid display)
       if (data.accounts && Array.isArray(data.accounts)) {
-        displayAccountsAsNestedHybrid(data.accounts, data.namespace, data.total || data.accounts.length);
+        Renderer.displayAccountsAsNestedHybrid(data.accounts, data.namespace, data.total || data.accounts.length);
         return;
       }
 
-      // 9. ✅ Debt List Rendering (Nested hybrid display)
+      // 10. ✅ Debt List Rendering (Nested hybrid display)
       if (data.debts && Array.isArray(data.debts)) {
-        displayDebtsAsNestedHybrid(data.debts, data.namespace, data.total || data.debts.length);
+        Renderer.displayDebtsAsNestedHybrid(data.debts, data.namespace, data.total || data.debts.length);
         return;
       }
 
@@ -896,6 +685,12 @@ function displayResults(result: any) {
   // Fallback for other formats
   console.error('No valid content in response');
   console.log('Raw response:', JSON.stringify(result, null, 2));
+}
+
+// Helper function for JSON parsing with fallback
+function tryParseJson(input: any): any {
+  if (typeof input !== 'string') return input;
+  try { return JSON.parse(input); } catch { return input; }
 }
 
 // Start the program

@@ -59,7 +59,7 @@ export class AIService {
     return `${key.substring(0, 4)}****${key.substring(key.length - 4)}`;
   }
 
-  async parseRawInput(rawArgs: string[]): Promise<CleanedParameters[] | null> {
+  async parseRawInput(rawArgs: string[], lastContext?: any): Promise<CleanedParameters[] | null> {
     if (!this.enabled) {
       console.error('[Debug] AI Service is disabled');
       return null;
@@ -98,16 +98,27 @@ export class AIService {
 4. 自动去重，避免重复的资源类型
 5. 只返回纯 JSON 数组，不要包含 markdown 代码块`;
 
+    // 在 systemPrompt 定义之后，request 构造之前
+    const userMessageParts = [
+      { text: `输入参数: ${JSON.stringify(rawArgs)}` }
+    ];
+
+    if (lastContext) {
+      // 截取前 50000 个字符防止 Token 溢出，作为短期记忆
+      const contextStr = JSON.stringify(lastContext).substring(0, 50000);
+      userMessageParts.push({
+        text: `【上一步工具执行结果（参考上下文）】:\n${contextStr}\n如果用户输入指代不清（如"查看日志"），请根据上下文推断目标资源。`
+      });
+    }
+
+    userMessageParts.push({ text: "请清洗为标准格式。" });
+
     const request: AIRequest = {
       contents: [
         {
           parts: [
-            {
-              text: systemPrompt
-            },
-            {
-              text: `输入参数: ${JSON.stringify(rawArgs)}\n请清洗为标准格式。`
-            }
+            { text: systemPrompt },
+            ...userMessageParts // 使用动态构建的 parts
           ]
         }
       ],
