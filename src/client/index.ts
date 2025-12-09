@@ -170,9 +170,14 @@ async function main() {
 // Resource to tool mapping
 const TOOL_MAPPING: Record<string, string> = {
   'cluster': 'list_cluster_by_ns',
+  'node': 'list_nodes',
+  'account': 'list_account_by_ns',
+  'debt': 'list_debt_by_ns',
   'devbox': 'list_devbox_by_ns',
+  'cronjob': 'list_cronjobs_by_ns',
   'pods': 'list_pods_by_ns',
   'ingress': 'list_ingress_by_ns',
+  'event': 'list_events_by_ns',
   'quota': 'list_quota_by_ns'
 };
 
@@ -358,7 +363,7 @@ async function runMcpTaskLegacy(params: CleanedParameters): Promise<void> {
 // Aggregated results display function for multi-resource queries
 function displayAggregatedResults(results: Array<{resource: string, result?: any, error?: string}>) {
   // Define priority order for display
-  const priority: Record<string, number> = { cluster: 1, devbox: 2, pods: 3, ingress: 4, quota: 5 };
+  const priority: Record<string, number> = { cluster: 1, node: 2, account: 3, debt: 4, devbox: 5, cronjob: 6, pods: 7, ingress: 8, event: 9, quota: 10 };
 
   // Sort results by priority
   const sortedResults = results.sort((a, b) => {
@@ -474,7 +479,42 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
           continue;
         }
 
-        // 6. Error Handling
+        // 6. Node List Rendering
+        if (data.nodes && Array.isArray(data.nodes)) {
+          displayNodesAsHybridRows(data.nodes);
+          totalFound += data.nodes.length;
+          continue;
+        }
+
+        // 7. CronJob List Rendering
+        if (data.cronjobs && Array.isArray(data.cronjobs)) {
+          displayCronjobsAsHybridRows(data.cronjobs, data.namespace, data.total || data.cronjobs.length);
+          totalFound += data.cronjobs.length;
+          continue;
+        }
+
+        // 8. Event List Rendering
+        if (data.events && Array.isArray(data.events)) {
+          displayEventsAsTimeline(data.events, data.namespace);
+          totalFound += data.events.length;
+          continue;
+        }
+
+        // 9. Account List Rendering
+        if (data.accounts && Array.isArray(data.accounts)) {
+          displayAccountsAsNestedHybrid(data.accounts, data.namespace, data.total || data.accounts.length);
+          totalFound += data.accounts.length;
+          continue;
+        }
+
+        // 10. Debt List Rendering
+        if (data.debts && Array.isArray(data.debts)) {
+          displayDebtsAsNestedHybrid(data.debts, data.namespace, data.total || data.debts.length);
+          totalFound += data.debts.length;
+          continue;
+        }
+
+        // 11. Error Handling
         if (data.success === false) {
           console.error(`❌ Operation Failed: ${data.error?.message || data.error || 'Unknown error'}`);
           if (data.error?.details) {
@@ -566,6 +606,123 @@ function displayIngressAsHybridRows(ingresses: any[], namespace: string, total: 
   console.log('─'.repeat(60));
 }
 
+// Helper function for displaying Node resources in hybrid row format
+function displayNodesAsHybridRows(nodes: any[]): void {
+  console.log(`\n🖥️  Found ${nodes.length} cluster nodes`);
+  console.log('─'.repeat(60));
+
+  nodes.forEach((node: any, index: number) => {
+    const nameStr = `[${index}] ${node.name}`;
+    const metaStr = `(Roles: ${node.roles || 'worker'} | Status: ${node.status || 'Unknown'})`;
+    console.log(`${nameStr.padEnd(30)} ${metaStr}`);
+
+    console.log(`    ├─ IP:       ${node.ip || '-'}`);
+    console.log(`    ├─ OS Image: ${node.osImage || '-'}`);
+    console.log(`    └─ Age:      ${node.age || '-'}`);
+    console.log('');
+  });
+
+  console.log('─'.repeat(60));
+}
+
+// Helper function for displaying CronJob resources in hybrid row format
+function displayCronjobsAsHybridRows(cronjobs: any[], namespace: string, total: number): void {
+  console.log(`\n⏰ Found ${total} cronjobs in namespace: ${namespace}`);
+  console.log('─'.repeat(60));
+
+  cronjobs.forEach((cronjob: any, index: number) => {
+    const nameStr = `[${index}] ${cronjob.name}`;
+    const metaStr = `(Schedule: ${cronjob.schedule || 'No schedule'} | Active: ${cronjob.active || 0})`;
+    console.log(`${nameStr.padEnd(35)} ${metaStr}`);
+
+    console.log(`    ├─ Suspend:       ${cronjob.suspend ? 'Yes' : 'No'}`);
+    console.log(`    ├─ Last Schedule: ${cronjob.lastSchedule || 'Never'}`);
+    console.log(`    └─ Age:          ${cronjob.age || '-'}`);
+    console.log('');
+  });
+
+  console.log('─'.repeat(60));
+}
+
+// Helper function for displaying Events in compact timeline format
+function displayEventsAsTimeline(events: any[], namespace: string): void {
+  console.log(`\n🔔 Found ${events.length} events in namespace: ${namespace} (Showing last 100)`);
+  console.log('─'.repeat(80));
+
+  events.forEach((e: any) => {
+    const timeStr = e.lastTimestamp ? new Date(e.lastTimestamp).toLocaleTimeString() : 'Unknown Time';
+    const header = `[${timeStr}] ${e.type}/${e.reason} | ${e.object}`;
+
+    const prefix = e.type === 'Warning' ? '⚠️ ' : '  ';
+
+    console.log(`${prefix}${header}`);
+    console.log(`     └─ ${e.message}`);
+    console.log('');
+  });
+
+  console.log('─'.repeat(80));
+}
+
+// Helper function for displaying Account resources in nested hybrid format
+function displayAccountsAsNestedHybrid(accounts: any[], namespace: string, total: number): void {
+  console.log(`\n💰 Found ${total} accounts in namespace: ${namespace}`);
+  console.log('─'.repeat(60));
+
+  accounts.forEach((account: any, index: number) => {
+    const nameStr = `[${index}] ${account.name}`;
+    const status = account.status || {};
+    const metaStr = `(Type: ${status.type || 'Unknown'} | Balance: ${status.balance || 'N/A'})`;
+    console.log(`${nameStr.padEnd(35)} ${metaStr}`);
+
+    console.log(`    ├─ Created: ${status.creationTime || '-'}`);
+
+    // Display charge list if available
+    if (status.chargeList && status.chargeList.length > 0) {
+      console.log(`    └─ Charge List:`);
+      status.chargeList.forEach((charge: any, idx: number) => {
+        const isLast = idx === status.chargeList.length - 1;
+        const prefix = isLast ? '      └─' : '      ├─';
+        console.log(`${prefix} ${charge.type || 'Unknown'}: ${charge.amount || 0} ${charge.currency || ''}`);
+      });
+    } else {
+      console.log(`    └─ Charge List: No charges`);
+    }
+
+    console.log('');
+  });
+
+  console.log('─'.repeat(60));
+}
+
+// Helper function for displaying Debt resources in nested hybrid format
+function displayDebtsAsNestedHybrid(debts: any[], namespace: string, total: number): void {
+  console.log(`\n💳 Found ${total} debts in namespace: ${namespace}`);
+  console.log('─'.repeat(60));
+
+  debts.forEach((debt: any, index: number) => {
+    const nameStr = `[${index}] ${debt.name}`;
+    const status = debt.status || {};
+    const metaStr = `(Type: ${status.type || 'Unknown'} | Total: ${status.totalDebt || 0})`;
+    console.log(`${nameStr.padEnd(35)} ${metaStr}`);
+
+    // Display debt status records if available
+    if (status.debtStatusRecords && status.debtStatusRecords.length > 0) {
+      console.log(`    ├─ Debt Records:`);
+      status.debtStatusRecords.forEach((record: any, idx: number) => {
+        const isLast = idx === status.debtStatusRecords.length - 1;
+        const prefix = isLast ? '      └─' : '      ├─';
+        console.log(`${prefix} ${record.type || 'Unknown'}: ${record.amount || 0} (${record.status || 'Unknown'})`);
+      });
+    } else {
+      console.log(`    └─ Debt Records: No records`);
+    }
+
+    console.log('');
+  });
+
+  console.log('─'.repeat(60));
+}
+
 // Result display function (reuse existing logic)
 function displayResults(result: any) {
   // Check for content array (MCP format)
@@ -649,7 +806,37 @@ function displayResults(result: any) {
         return; // Exit immediately after rendering, no JSON dump
       }
 
-      // 5. ❌ Error Handling
+      // 5. ✅ Node List Rendering (Hybrid row display)
+      if (data.nodes && Array.isArray(data.nodes)) {
+        displayNodesAsHybridRows(data.nodes);
+        return;
+      }
+
+      // 6. ✅ CronJob List Rendering (Hybrid row display)
+      if (data.cronjobs && Array.isArray(data.cronjobs)) {
+        displayCronjobsAsHybridRows(data.cronjobs, data.namespace, data.total || data.cronjobs.length);
+        return;
+      }
+
+      // 7. ✅ Event List Rendering (Timeline display)
+      if (data.events && Array.isArray(data.events)) {
+        displayEventsAsTimeline(data.events, data.namespace);
+        return;
+      }
+
+      // 8. ✅ Account List Rendering (Nested hybrid display)
+      if (data.accounts && Array.isArray(data.accounts)) {
+        displayAccountsAsNestedHybrid(data.accounts, data.namespace, data.total || data.accounts.length);
+        return;
+      }
+
+      // 9. ✅ Debt List Rendering (Nested hybrid display)
+      if (data.debts && Array.isArray(data.debts)) {
+        displayDebtsAsNestedHybrid(data.debts, data.namespace, data.total || data.debts.length);
+        return;
+      }
+
+      // 10. ❌ Error Handling
       if (data.success === false) {
         console.error(`\n❌ Operation Failed: ${data.error?.message || data.error || 'Unknown error'}`);
         if (data.error?.details) {

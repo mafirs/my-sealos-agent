@@ -56,6 +56,121 @@ export interface ListIngressResponse {
   success: boolean;
 }
 
+// Node resource types
+export interface NodeInfo {
+  name: string;
+  status: string;
+  roles: string;
+  age?: string;
+  ip?: string;
+  osImage?: string;
+}
+
+export interface ListNodesResponse {
+  nodes: NodeInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
+// CronJob resource types
+export interface CronJobInfo {
+  name: string;
+  namespace: string;
+  schedule: string;
+  suspend: boolean;
+  active: number;
+  lastSchedule?: string;
+  age?: string;
+}
+
+export interface ListCronJobsResponse {
+  namespace: string;
+  cronjobs: CronJobInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
+// Event resource types
+export interface EventInfo {
+  type: string;
+  reason: string;
+  object: string;
+  message: string;
+  lastTimestamp: string;
+  count: number;
+}
+
+export interface ListEventsResponse {
+  namespace: string;
+  events: EventInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
+// Account resource types
+export interface ChargeListItem {
+  type: string;
+  amount: number;
+  currency?: string;
+}
+
+export interface AccountStatus {
+  type?: string;
+  balance?: number;
+  creationTime?: string;
+  chargeList?: ChargeListItem[];
+  [key: string]: any;
+}
+
+export interface AccountInfo {
+  name: string;
+  namespace: string;
+  status?: AccountStatus;
+  age?: string;
+}
+
+export interface ListAccountResponse {
+  namespace: string;
+  accounts: AccountInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
+// Debt resource types
+export interface DebtStatusRecord {
+  type: string;
+  amount: number;
+  status: string;
+  dueDate?: string;
+  [key: string]: any;
+}
+
+export interface DebtStatus {
+  type?: string;
+  totalDebt?: number;
+  debtStatusRecords?: DebtStatusRecord[];
+  [key: string]: any;
+}
+
+export interface DebtInfo {
+  name: string;
+  namespace: string;
+  status?: DebtStatus;
+  age?: string;
+}
+
+export interface ListDebtResponse {
+  namespace: string;
+  debts: DebtInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
 export interface KubeConfigInfo {
   cluster: string;
   user: string;

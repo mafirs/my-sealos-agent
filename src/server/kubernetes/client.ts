@@ -6,6 +6,7 @@ export class KubernetesClient {
   private k8sApi: k8s.CoreV1Api;
   private customObjectsApi: k8s.CustomObjectsApi;
   private networkingV1Api: k8s.NetworkingV1Api;
+  private batchV1Api: k8s.BatchV1Api;
 
   constructor(kubeconfigPath?: string) {
     this.kc = new k8s.KubeConfig();
@@ -21,6 +22,7 @@ export class KubernetesClient {
     this.k8sApi = this.kc.makeApiClient(k8s.CoreV1Api);
     this.customObjectsApi = this.kc.makeApiClient(k8s.CustomObjectsApi);
     this.networkingV1Api = this.kc.makeApiClient(k8s.NetworkingV1Api);
+    this.batchV1Api = this.kc.makeApiClient(k8s.BatchV1Api);
   }
 
   /**
@@ -42,6 +44,13 @@ export class KubernetesClient {
    */
   getNetworkingV1Api(): k8s.NetworkingV1Api {
     return this.networkingV1Api;
+  }
+
+  /**
+   * Get the Batch V1 API client for CronJob resources
+   */
+  getBatchV1Api(): k8s.BatchV1Api {
+    return this.batchV1Api;
   }
 
   /**

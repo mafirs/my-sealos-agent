@@ -4,12 +4,28 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { LIST_PODS_BY_NS_TOOL, LIST_DEVBOX_BY_NS_TOOL, LIST_CLUSTER_BY_NS_TOOL, LIST_QUOTA_BY_NS_TOOL, LIST_INGRESS_BY_NS_TOOL } from './tools/types';
+import {
+  LIST_PODS_BY_NS_TOOL,
+  LIST_DEVBOX_BY_NS_TOOL,
+  LIST_CLUSTER_BY_NS_TOOL,
+  LIST_QUOTA_BY_NS_TOOL,
+  LIST_INGRESS_BY_NS_TOOL,
+  LIST_NODES_TOOL,
+  LIST_CRONJOBS_BY_NS_TOOL,
+  LIST_EVENTS_BY_NS_TOOL,
+  LIST_ACCOUNT_BY_NS_TOOL,
+  LIST_DEBT_BY_NS_TOOL
+} from './tools/types';
 import { listPodsByNamespace } from './tools/list-pods-by-ns';
 import { listDevboxByNamespace } from './tools/list-devbox-by-ns';
 import { listClusterByNamespace } from './tools/list-cluster-by-ns';
 import { listQuotaByNamespace } from './tools/list-quota-by-ns';
 import { listIngressByNamespace } from './tools/list-ingress-by-ns';
+import { listNodes } from './tools/list-nodes';
+import { listCronjobsByNamespace } from './tools/list-cronjobs-by-ns';
+import { listEventsByNamespace } from './tools/list-events-by-ns';
+import { listAccountByNamespace } from './tools/list-account-by-ns';
+import { listDebtByNamespace } from './tools/list-debt-by-ns';
 import { kubernetesClient } from './kubernetes/client';
 
 async function main() {
@@ -40,7 +56,18 @@ async function main() {
   // Register tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
-      tools: [LIST_PODS_BY_NS_TOOL, LIST_DEVBOX_BY_NS_TOOL, LIST_CLUSTER_BY_NS_TOOL, LIST_QUOTA_BY_NS_TOOL, LIST_INGRESS_BY_NS_TOOL],
+      tools: [
+        LIST_PODS_BY_NS_TOOL,
+        LIST_DEVBOX_BY_NS_TOOL,
+        LIST_CLUSTER_BY_NS_TOOL,
+        LIST_QUOTA_BY_NS_TOOL,
+        LIST_INGRESS_BY_NS_TOOL,
+        LIST_NODES_TOOL,
+        LIST_CRONJOBS_BY_NS_TOOL,
+        LIST_EVENTS_BY_NS_TOOL,
+        LIST_ACCOUNT_BY_NS_TOOL,
+        LIST_DEBT_BY_NS_TOOL,
+      ],
     };
   });
 
@@ -101,6 +128,61 @@ async function main() {
               {
                 type: 'text',
                 text: JSON.stringify(ingressResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_nodes':
+          const nodesResult = await listNodes(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(nodesResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_cronjobs_by_ns':
+          const cronjobsResult = await listCronjobsByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(cronjobsResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_events_by_ns':
+          const eventsResult = await listEventsByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(eventsResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_account_by_ns':
+          const accountResult = await listAccountByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(accountResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_debt_by_ns':
+          const debtResult = await listDebtByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(debtResult, null, 2),
               },
             ],
           };
