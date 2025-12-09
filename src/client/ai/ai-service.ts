@@ -112,7 +112,7 @@ export class AIService {
       ],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 102400
+        maxOutputTokens: 8192
       }
     };
 
