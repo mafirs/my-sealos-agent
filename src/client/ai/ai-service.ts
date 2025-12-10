@@ -70,33 +70,41 @@ export class AIService {
       throw new Error(`Expected at least 2 parameters, got ${rawArgs.length}`);
     }
 
-    const systemPrompt = `你是一个参数清洗工具。任务是将乱序的输入清洗为 JSON 对象数组。
+    const systemPrompt = `你是一个严格的数据清洗工具。你的唯一任务是将用户的乱序输入转换为标准 JSON 数组。
 
-核心逻辑：
-1. 提取公共参数：namespace (ns-开头), identifier (标识符)。Node 资源 namespace 默认为空字符串 ""
-2. 识别资源列表：在输入中查找 ["node", "cronjob", "event", "account", "debt", "pods", "devbox", "cluster", "ingress", "quota"]，忽略大小写
-3. 自动去重（例如输入两个 devbox 只算一个）
-4. 如果完全没有发现资源关键词，默认添加 "pods"
-5. 笛卡尔积生成：为每一个识别到的资源类型，生成一个独立的对象，共享 namespace 和 identifier
+【转换规则】
+1. 提取 namespace (以 "ns-" 开头)。Node 资源 namespace 默认为 ""。
+2. 提取 identifier (固定值 "hzh" 或其他标识符)。
+3. 提取 resource，必须根据以下映射表进行标准化（忽略大小写）：
+   - obs, bucket, objectstorage -> "objectstorage"
+   - cert, certificate -> "certificate"
+   - db, cluster -> "cluster"
+   - node -> "node"
+   - cronjob -> "cronjob"
+   - event -> "event"
+   - account -> "account"
+   - debt -> "debt"
+   - pod, pods -> "pods"
+   - devbox -> "devbox"
+   - ingress -> "ingress"
+   - quota -> "quota"
+4. 如果输入中未发现任何资源关键词，默认 resource 为 "pods"。
+5. 自动去重。
 
-规则：
-- identifier: 固定值 "hzh" 或从输入中提取的标识符
-- resource: 枚举值 "node" | "cronjob" | "event" | "account" | "debt" | "pods" | "devbox" | "cluster" | "ingress" | "quota"，支持识别多个资源
-- namespace: 以 "ns-" 开头的字符串，如 "ns-mh69tey1"，node 资源可以为空字符串 ""
+【输出要求】
+- 必须仅返回纯 JSON 数组字符串。
+- 严禁包含 markdown 标记（如 \`\`\`json）。
+- 严禁包含任何解释性文字或代码。
 
-输入示例：
-- ["hzh", "pods", "ns-mh69tey1"] -> [{"namespace":"ns-mh69tey1","resource":"pods","identifier":"hzh"}]
-- ["ns-mh69tey1", "devbox", "cluster", "hzh"] -> [{"namespace":"ns-mh69tey1","resource":"devbox","identifier":"hzh"},{"namespace":"ns-mh69tey1","resource":"cluster","identifier":"hzh"}]
-- ["ns-m1", "pods", "devbox", "cluster", "ingress", "quota", "hzh"] -> [{"namespace":"ns-m1","resource":"pods","identifier":"hzh"},{"namespace":"ns-m1","resource":"devbox","identifier":"hzh"},{"namespace":"ns-m1","resource":"cluster","identifier":"hzh"},{"namespace":"ns-m1","resource":"ingress","identifier":"hzh"},{"namespace":"ns-m1","resource":"quota","identifier":"hzh"}]
-- ["ns-m1", "hzh"] -> [{"namespace":"ns-m1","resource":"pods","identifier":"hzh"}]
-- ["node", "hzh"] -> [{"namespace":"","resource":"node","identifier":"hzh"}]
+【示例】
+输入: ["hzh", "obs", "ns-test"]
+输出: [{"namespace":"ns-test","resource":"objectstorage","identifier":"hzh"}]
 
-要求：
-1. 返回 JSON 数组，每个对象包含 namespace, resource, identifier 三个字段
-2. 如果缺少 namespace 且资源不是 node，返回 null
-3. 资源类型按优先级排序：cluster > node > account > debt > devbox > cronjob > pods > ingress > event > quota
-4. 自动去重，避免重复的资源类型
-5. 只返回纯 JSON 数组，不要包含 markdown 代码块`;
+输入: ["ns-m1", "cert", "bucket", "hzh"]
+输出: [{"namespace":"ns-m1","resource":"certificate","identifier":"hzh"},{"namespace":"ns-m1","resource":"objectstorage","identifier":"hzh"}]
+
+输入: ["node", "hzh"]
+输出: [{"namespace":"","resource":"node","identifier":"hzh"}]`;
 
     // 在 systemPrompt 定义之后，request 构造之前
     const userMessageParts = [

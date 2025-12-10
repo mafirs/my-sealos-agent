@@ -229,3 +229,49 @@ export const LIST_DEBT_BY_NS_TOOL = {
     required: ['namespace'],
   },
 };
+
+// Schema for list_objectstoragebucket_by_ns tool
+export const ListObjectStorageBucketByNsInputSchema = z.object({
+  namespace: z.string().min(1, 'Namespace is required'),
+});
+
+export type ListObjectStorageBucketByNsInput = z.infer<typeof ListObjectStorageBucketByNsInputSchema>;
+
+// ObjectStorageBucket tool definitions for MCP
+export const LIST_OBJECTSTORAGEBUCKET_BY_NS_TOOL = {
+  name: 'list_objectstoragebucket_by_ns',
+  description: 'List ObjectStorageBucket CRD resources in a specific namespace',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      namespace: {
+        type: 'string',
+        description: 'The namespace to list ObjectStorageBucket CRD resources from',
+      },
+    },
+    required: ['namespace'],
+  },
+};
+
+// Schema for list_certificate_by_ns tool
+export const ListCertificateByNsInputSchema = z.object({
+  namespace: z.string().min(1, 'Namespace is required'),
+});
+
+export type ListCertificateByNsInput = z.infer<typeof ListCertificateByNsInputSchema>;
+
+// Certificate tool definitions for MCP
+export const LIST_CERTIFICATE_BY_NS_TOOL = {
+  name: 'list_certificate_by_ns',
+  description: 'List Certificate CRD resources in a specific namespace',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      namespace: {
+        type: 'string',
+        description: 'The namespace to list Certificate CRD resources from',
+      },
+    },
+    required: ['namespace'],
+  },
+};

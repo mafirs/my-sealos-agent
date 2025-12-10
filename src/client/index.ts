@@ -193,6 +193,11 @@ const TOOL_MAPPING: Record<string, string> = {
   'account': 'list_account_by_ns',
   'debt': 'list_debt_by_ns',
   'devbox': 'list_devbox_by_ns',
+  'objectstorage': 'list_objectstoragebucket_by_ns',
+  'obs': 'list_objectstoragebucket_by_ns',
+  'bucket': 'list_objectstoragebucket_by_ns',
+  'certificate': 'list_certificate_by_ns',
+  'cert': 'list_certificate_by_ns',
   'cronjob': 'list_cronjobs_by_ns',
   'pods': 'list_pods_by_ns',
   'ingress': 'list_ingress_by_ns',
@@ -384,7 +389,7 @@ async function runMcpTaskLegacy(params: CleanedParameters): Promise<any> {
 // Aggregated results display function for multi-resource queries
 function displayAggregatedResults(results: Array<{resource: string, result?: any, error?: string}>) {
   // Define priority order for display
-  const priority: Record<string, number> = { cluster: 1, node: 2, account: 3, debt: 4, devbox: 5, cronjob: 6, pods: 7, ingress: 8, event: 9, quota: 10 };
+  const priority: Record<string, number> = { cluster: 1, node: 2, account: 3, debt: 4, devbox: 5, objectstorage: 6, certificate: 7, cronjob: 8, pods: 9, ingress: 10, event: 11, quota: 12 };
 
   // Sort results by priority
   const sortedResults = results.sort((a, b) => {
@@ -491,7 +496,21 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
           continue;
         }
 
-        // 11. Error Handling
+        // 11. ObjectStorageBucket List Rendering
+        if (data.objectstoragebuckets && Array.isArray(data.objectstoragebuckets)) {
+          Renderer.displayObjectStorageBucketsAsTable(data.objectstoragebuckets, data.namespace, data.total || data.objectstoragebuckets.length);
+          totalFound += data.objectstoragebuckets.length;
+          continue;
+        }
+
+        // 12. Certificate List Rendering
+        if (data.certificates && Array.isArray(data.certificates)) {
+          Renderer.displayCertificatesAsTable(data.certificates, data.namespace, data.total || data.certificates.length);
+          totalFound += data.certificates.length;
+          continue;
+        }
+
+        // 13. Error Handling
         if (data.success === false) {
           console.error(`❌ Operation Failed: ${data.error?.message || data.error || 'Unknown error'}`);
           if (data.error?.details) {
@@ -624,7 +643,19 @@ function displayResults(result: any) {
         return;
       }
 
-      // 10. ❌ Error Handling
+      // 11. ✅ ObjectStorageBucket List Rendering
+      if (data.objectstoragebuckets && Array.isArray(data.objectstoragebuckets)) {
+        Renderer.displayObjectStorageBucketsAsTable(data.objectstoragebuckets, data.namespace, data.total || data.objectstoragebuckets.length);
+        return;
+      }
+
+      // 12. ✅ Certificate List Rendering
+      if (data.certificates && Array.isArray(data.certificates)) {
+        Renderer.displayCertificatesAsTable(data.certificates, data.namespace, data.total || data.certificates.length);
+        return;
+      }
+
+      // 13. ❌ Error Handling
       if (data.success === false) {
         console.error(`\n❌ Operation Failed: ${data.error?.message || data.error || 'Unknown error'}`);
         if (data.error?.details) {

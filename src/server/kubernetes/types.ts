@@ -176,3 +176,40 @@ export interface KubeConfigInfo {
   user: string;
   namespace: string;
 }
+
+// ObjectStorageBucket resource types
+export interface ObjectStorageBucketInfo {
+  name: string;
+  namespace: string;
+  policy: string;
+  size: string;
+  bucketName: string;
+  age?: string;
+}
+
+export interface ListObjectStorageBucketResponse {
+  namespace: string;
+  objectstoragebuckets: ObjectStorageBucketInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}
+
+// Certificate resource types
+export interface CertificateInfo {
+  name: string;
+  namespace: string;
+  ready: string;
+  secret: string;
+  issuer: string;
+  notAfter: string;
+  age?: string;
+}
+
+export interface ListCertificateResponse {
+  namespace: string;
+  certificates: CertificateInfo[];
+  total: number;
+  error?: KubernetesError;
+  success: boolean;
+}

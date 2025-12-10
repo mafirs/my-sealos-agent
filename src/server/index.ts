@@ -14,7 +14,9 @@ import {
   LIST_CRONJOBS_BY_NS_TOOL,
   LIST_EVENTS_BY_NS_TOOL,
   LIST_ACCOUNT_BY_NS_TOOL,
-  LIST_DEBT_BY_NS_TOOL
+  LIST_DEBT_BY_NS_TOOL,
+  LIST_OBJECTSTORAGEBUCKET_BY_NS_TOOL,
+  LIST_CERTIFICATE_BY_NS_TOOL
 } from './tools/types';
 import { listPodsByNamespace } from './tools/list-pods-by-ns';
 import { listDevboxByNamespace } from './tools/list-devbox-by-ns';
@@ -26,6 +28,8 @@ import { listCronjobsByNamespace } from './tools/list-cronjobs-by-ns';
 import { listEventsByNamespace } from './tools/list-events-by-ns';
 import { listAccountByNamespace } from './tools/list-account-by-ns';
 import { listDebtByNamespace } from './tools/list-debt-by-ns';
+import { listObjectStorageBucketByNamespace } from './tools/list-objectstoragebucket-by-ns';
+import { listCertificateByNamespace } from './tools/list-certificate-by-ns';
 import { kubernetesClient } from './kubernetes/client';
 
 async function main() {
@@ -67,6 +71,8 @@ async function main() {
         LIST_EVENTS_BY_NS_TOOL,
         LIST_ACCOUNT_BY_NS_TOOL,
         LIST_DEBT_BY_NS_TOOL,
+        LIST_OBJECTSTORAGEBUCKET_BY_NS_TOOL,
+        LIST_CERTIFICATE_BY_NS_TOOL,
       ],
     };
   });
@@ -183,6 +189,28 @@ async function main() {
               {
                 type: 'text',
                 text: JSON.stringify(debtResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_objectstoragebucket_by_ns':
+          const objectstoragebucketResult = await listObjectStorageBucketByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(objectstoragebucketResult, null, 2),
+              },
+            ],
+          };
+
+        case 'list_certificate_by_ns':
+          const certificateResult = await listCertificateByNamespace(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(certificateResult, null, 2),
               },
             ],
           };

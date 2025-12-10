@@ -63,3 +63,34 @@ export function displayQuotasAsTransposedTable(quotas: any[], namespace: string,
     console.table(resources);
   });
 }
+
+// ObjectStorageBucket table rendering function
+export function displayObjectStorageBucketsAsTable(objectstoragebuckets: any[], namespace: string, total: number): void {
+  console.log(`🪣 Found ${total || objectstoragebuckets.length} object storage buckets in namespace: ${namespace}`);
+
+  const tableData = objectstoragebuckets.map((b: any) => ({
+    Name: b.name,
+    Policy: b.policy,
+    Size: b.size,
+    'Bucket Name': b.bucketName,
+    Age: b.age || '-'
+  }));
+
+  console.table(tableData);
+}
+
+// Certificate table rendering function
+export function displayCertificatesAsTable(certificates: any[], namespace: string, total: number): void {
+  console.log(`🔐 Found ${total || certificates.length} certificates in namespace: ${namespace}`);
+
+  const tableData = certificates.map((c: any) => ({
+    Name: c.name,
+    Ready: c.ready,
+    Secret: c.secret,
+    Issuer: c.issuer,
+    'Expires': c.notAfter,
+    Age: c.age || '-'
+  }));
+
+  console.table(tableData);
+}
