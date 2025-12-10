@@ -16,7 +16,8 @@ import {
   LIST_ACCOUNT_BY_NS_TOOL,
   LIST_DEBT_BY_NS_TOOL,
   LIST_OBJECTSTORAGEBUCKET_BY_NS_TOOL,
-  LIST_CERTIFICATE_BY_NS_TOOL
+  LIST_CERTIFICATE_BY_NS_TOOL,
+  INSPECT_RESOURCE_TOOL
 } from './tools/types';
 import { listPodsByNamespace } from './tools/list-pods-by-ns';
 import { listDevboxByNamespace } from './tools/list-devbox-by-ns';
@@ -30,6 +31,7 @@ import { listAccountByNamespace } from './tools/list-account-by-ns';
 import { listDebtByNamespace } from './tools/list-debt-by-ns';
 import { listObjectStorageBucketByNamespace } from './tools/list-objectstoragebucket-by-ns';
 import { listCertificateByNamespace } from './tools/list-certificate-by-ns';
+import { inspectResource } from './tools/inspect-resource';
 import { kubernetesClient } from './kubernetes/client';
 
 async function main() {
@@ -73,6 +75,7 @@ async function main() {
         LIST_DEBT_BY_NS_TOOL,
         LIST_OBJECTSTORAGEBUCKET_BY_NS_TOOL,
         LIST_CERTIFICATE_BY_NS_TOOL,
+        INSPECT_RESOURCE_TOOL,
       ],
     };
   });
@@ -211,6 +214,17 @@ async function main() {
               {
                 type: 'text',
                 text: JSON.stringify(certificateResult, null, 2),
+              },
+            ],
+          };
+
+        case 'inspect_resource':
+          const inspectResult = await inspectResource(args as any);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(inspectResult, null, 2),
               },
             ],
           };

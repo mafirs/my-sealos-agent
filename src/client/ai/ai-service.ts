@@ -25,6 +25,7 @@ export interface CleanedParameters {
   namespace: string;
   resource: string;
   identifier: string;
+  intent: 'list' | 'inspect';
 }
 
 export class AIService {
@@ -91,6 +92,14 @@ export class AIService {
 4. 如果输入中未发现任何资源关键词，默认 resource 为 "pods"。
 5. 自动去重。
 
+【意图识别】
+6. 如果输入包含 describe, desc, inspect, detail, xiangqing, 查看详情 等词，设置 intent 为 "inspect"。
+7. 否则默认为 "list"。
+
+【标识符提取】
+- inspect 模式：identifier 必须是具体的资源名称（如 mysql-0, my-cluster）。
+- list 模式：保持现有逻辑，默认 "hzh"。
+
 【输出要求】
 - 必须仅返回纯 JSON 数组字符串。
 - 严禁包含 markdown 标记（如 \`\`\`json）。
@@ -98,13 +107,16 @@ export class AIService {
 
 【示例】
 输入: ["hzh", "obs", "ns-test"]
-输出: [{"namespace":"ns-test","resource":"objectstorage","identifier":"hzh"}]
+输出: [{"namespace":"ns-test","resource":"objectstorage","identifier":"hzh","intent":"list"}]
 
 输入: ["ns-m1", "cert", "bucket", "hzh"]
-输出: [{"namespace":"ns-m1","resource":"certificate","identifier":"hzh"},{"namespace":"ns-m1","resource":"objectstorage","identifier":"hzh"}]
+输出: [{"namespace":"ns-m1","resource":"certificate","identifier":"hzh","intent":"list"},{"namespace":"ns-m1","resource":"objectstorage","identifier":"hzh","intent":"list"}]
+
+输入: ["describe", "pod", "mysql-0", "ns-test"]
+输出: [{"namespace":"ns-test","resource":"pods","identifier":"mysql-0","intent":"inspect"}]
 
 输入: ["node", "hzh"]
-输出: [{"namespace":"","resource":"node","identifier":"hzh"}]`;
+输出: [{"namespace":"","resource":"node","identifier":"hzh","intent":"list"}]`;
 
     // 在 systemPrompt 定义之后，request 构造之前
     const userMessageParts = [
@@ -238,7 +250,8 @@ export class AIService {
           return validItems.map(item => ({
             namespace: item.namespace,
             resource: item.resource,
-            identifier: item.identifier
+            identifier: item.identifier,
+            intent: item.intent || 'list'
           }));
         }
         // Handle single object response (backward compatibility)
@@ -247,7 +260,8 @@ export class AIService {
           return [{
             namespace: parsed.namespace || '',
             resource: parsed.resource,
-            identifier: parsed.identifier
+            identifier: parsed.identifier,
+            intent: parsed.intent || 'list'
           }];
         }
 

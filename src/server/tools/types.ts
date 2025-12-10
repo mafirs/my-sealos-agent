@@ -275,3 +275,36 @@ export const LIST_CERTIFICATE_BY_NS_TOOL = {
     required: ['namespace'],
   },
 };
+
+// Schema for inspect_resource tool
+export const InspectResourceInputSchema = z.object({
+  resource: z.string().min(1, 'Resource type is required'),
+  name: z.string().min(1, 'Resource name is required'),
+  namespace: z.string().min(1, 'Namespace is required'),
+});
+
+export type InspectResourceInput = z.infer<typeof InspectResourceInputSchema>;
+
+// Inspect resource tool definitions for MCP
+export const INSPECT_RESOURCE_TOOL = {
+  name: 'inspect_resource',
+  description: 'Inspect a Kubernetes resource by fetching its manifest, events, and logs (for pods)',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      resource: {
+        type: 'string',
+        description: 'The type of resource to inspect (e.g., pod, deployment, service, devbox, cluster). Both singular and plural forms are accepted.',
+      },
+      name: {
+        type: 'string',
+        description: 'The name of the resource to inspect',
+      },
+      namespace: {
+        type: 'string',
+        description: 'The namespace where the resource is located',
+      },
+    },
+    required: ['resource', 'name', 'namespace'],
+  },
+};

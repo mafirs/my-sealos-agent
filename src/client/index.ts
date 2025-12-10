@@ -327,16 +327,32 @@ async function executeSingleMcpTask(params: CleanedParameters): Promise<{resourc
 
     // Send request
     try {
-      const toolName = TOOL_MAPPING[params.resource] || 'list_pods_by_ns';
+      let toolName;
+      let requestArgs;
+
+      if (params.intent === 'inspect') {
+        // Force use inspect_resource tool
+        toolName = 'inspect_resource';
+        requestArgs = {
+          namespace: params.namespace,
+          resource: params.resource, // Server supports both singular and plural
+          name: params.identifier    // Actual resource name for inspect
+        };
+      } else {
+        // Use existing TOOL_MAPPING logic for list
+        toolName = TOOL_MAPPING[params.resource] || 'list_pods_by_ns';
+        requestArgs = {
+          namespace: params.namespace
+        };
+      }
+
       const request = {
         jsonrpc: '2.0',
         id: Date.now(),
         method: 'tools/call',
         params: {
           name: toolName,
-          arguments: {
-            namespace: params.namespace
-          }
+          arguments: requestArgs
         }
       };
 
@@ -425,6 +441,14 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
       if (result && result.content && result.content.length > 0) {
         const textContent = result.content[0].text;
         const data = JSON.parse(textContent);
+
+        // Check for inspect_resource response first
+        if (data.manifest || (data.events && Array.isArray(data.events))) {
+          console.log(`\n🔍 Inspect Result for ${resource}:`);
+          console.log(JSON.stringify(data, null, 2));
+          totalFound += 1; // Count as one item
+          continue;
+        }
 
         // 1. Cluster List Rendering
         if (data.clusters && Array.isArray(data.clusters)) {
@@ -582,6 +606,13 @@ function displayResults(result: any) {
     const textContent = result.content[0].text;
     try {
       const data = JSON.parse(textContent);
+
+      // Check for inspect_resource response first
+      if (data.manifest || (data.events && Array.isArray(data.events))) {
+        console.log('\n🔍 Inspect Result:');
+        console.log(JSON.stringify(data, null, 2));
+        return; // Exit early for inspect results
+      }
 
       // 1. ✅ Cluster List Rendering
       if (data.clusters && Array.isArray(data.clusters)) {
