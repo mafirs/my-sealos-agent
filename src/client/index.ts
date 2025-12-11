@@ -25,6 +25,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import * as Renderer from './renderers';
 import { transformToViewModel } from './viewmodels/inspect-viewmodel';
 import { renderInspectView } from './renderers/inspect-renderer';
+import { sortKeys } from './utils/sort-keys';
 
 // Global variables for process tracking
 let activeMcpServers = new Set<ChildProcess>();
@@ -100,9 +101,13 @@ async function main() {
       return;
     }
 
+    // Detect raw mode flag
+    const isRawMode = input.includes('--raw');
+    const cleanInput = input.replace(/--raw/g, '').trim();
+
     try {
       // Parse raw parameters
-      const rawArgs = input.split(/\s+/);
+      const rawArgs = cleanInput.split(/\s+/);
 
       // AI cleaning parameters
       console.error('[AI] Processing input...');
@@ -120,7 +125,7 @@ async function main() {
       // Execute MCP tasks (parallel or single based on array length)
       if (cleanedParamsList.length === 1) {
         // Single resource - use legacy function for backward compatibility
-        const resultRaw = await runMcpTaskLegacy(cleanedParamsList[0]);
+        const resultRaw = await runMcpTaskLegacy(cleanedParamsList[0], isRawMode);
         // 构造一致的上下文格式
         lastToolResult = [{
           resource: cleanedParamsList[0].resource,
@@ -140,7 +145,7 @@ async function main() {
           error: r.error
         }));
 
-        displayAggregatedResults(results);
+        displayAggregatedResults(results, isRawMode);
       }
 
     } catch (error) {
@@ -390,7 +395,7 @@ async function runMcpTask(paramsList: CleanedParameters[]): Promise<Array<{resou
 }
 
 // Legacy single execution function (backward compatibility)
-async function runMcpTaskLegacy(params: CleanedParameters): Promise<any> {
+async function runMcpTaskLegacy(params: CleanedParameters, isRawMode: boolean = false): Promise<any> {
   const result = await executeSingleMcpTask(params);
 
   if (result.error) {
@@ -398,14 +403,14 @@ async function runMcpTaskLegacy(params: CleanedParameters): Promise<any> {
   }
 
   if (result.result) {
-    displayResults(result.result);
+    displayResults(result.result, isRawMode);
   }
 
   return result;
 }
 
 // Aggregated results display function for multi-resource queries
-function displayAggregatedResults(results: Array<{resource: string, result?: any, error?: string}>) {
+function displayAggregatedResults(results: Array<{resource: string, result?: any, error?: string}>, isRawMode: boolean = false) {
   // Define priority order for display
   const priority: Record<string, number> = { cluster: 1, node: 2, account: 3, debt: 4, devbox: 5, objectstorage: 6, certificate: 7, cronjob: 8, pods: 9, ingress: 10, event: 11, quota: 12 };
 
@@ -447,7 +452,11 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
         // Check for inspect_resource response first
         if (data.manifest || (data.events && Array.isArray(data.events))) {
           console.log(`\n🔍 Inspect Result for ${resource}:`);
-          console.log(JSON.stringify(data, null, 2));
+          if (isRawMode) {
+            console.log(JSON.stringify(sortKeys(data), null, 2));
+          } else {
+            console.log(JSON.stringify(data, null, 2));
+          }
           totalFound += 1; // Count as one item
           continue;
         }
@@ -602,7 +611,7 @@ function displayAggregatedResults(results: Array<{resource: string, result?: any
 
 
 // Result display function (reuse existing logic)
-function displayResults(result: any) {
+function displayResults(result: any, isRawMode: boolean = false) {
   // Check for content array (MCP format)
   if (result && result.content && result.content.length > 0) {
     const textContent = result.content[0].text;
@@ -611,13 +620,17 @@ function displayResults(result: any) {
 
       // Check for inspect_resource response first
       if (data.manifest || (data.events && Array.isArray(data.events))) {
-        const viewModel = transformToViewModel(data);
-        if (viewModel) {
-          renderInspectView(viewModel);
+        if (isRawMode) {
+          console.log(JSON.stringify(sortKeys(data), null, 2));
         } else {
-          console.error('Failed to transform inspect data to view model');
-          console.log('\n🔍 Raw Inspect Result:');
-          console.log(JSON.stringify(data, null, 2));
+          const viewModel = transformToViewModel(data);
+          if (viewModel) {
+            renderInspectView(viewModel);
+          } else {
+            console.error('Failed to transform inspect data to view model');
+            console.log('\n🔍 Raw Inspect Result:');
+            console.log(JSON.stringify(data, null, 2));
+          }
         }
         return; // Exit early for inspect results
       }
