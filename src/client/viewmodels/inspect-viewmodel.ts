@@ -3,13 +3,16 @@
 export interface DetailedContainer {
   name: string;
   image: string;
+  imageID: string;
   state: string; // e.g. "Running", "Waiting (Reason)"
   ready: boolean;
   restartCount: number;
   ports: string[];
-  env: string[];    // Format: "KEY=VALUE" (or "KEY (from Secret)")
+  env: string[];    // Format: "KEY=VALUE"
   mounts: string[]; // Format: "VolumeName -> ContainerPath"
   resources: string[]; // e.g. "CPU: 100m, Mem: 128Mi"
+  args?: string[];
+  command?: string[];
 }
 
 export interface DetailedCondition {
@@ -27,32 +30,35 @@ export interface InspectViewModel {
     namespace: string;
     status: string;
     statusColor: 'green' | 'red' | 'yellow' | 'gray';
-    age?: string;
-    node?: string;
-    ip?: string;
+    age: string;
+    node: string;
+    ip: string;
+    qosClass?: string;
+    controlledBy?: string;
   };
   metadata: {
     labels: string[]; // Format: "key=value"
     annotations: string[];
-    ownerReferences: string[];
     uid: string;
   };
   conditions: DetailedCondition[];
-  containers: DetailedContainer[]; // Include InitContainers if present
-  config: Array<{ key: string; value: string }>; // Keep for non-Pod resources
+  containers: DetailedContainer[]; // App containers
+  initContainers: DetailedContainer[]; // Init containers
+  volumes: string[]; // Format: "Name (Type): Source"
+  nodeInfo: {
+    selectors: string[];
+    tolerations: string[];
+  };
   events: Array<{
     time: string;
     type: string;
     reason: string;
     message: string;
   }>;
+  config: Array<{ key: string; value: string }>; // For non-pod resources
   logs?: string;
+  error?: { message: string; code?: number; reason?: string };
   warnings?: string[];
-  error?: {
-    message: string;
-    code?: number;
-    reason?: string;
-  };
 }
 
 // Helper function to calculate age from timestamp
@@ -92,97 +98,6 @@ function getStatusColor(status?: string): 'green' | 'red' | 'yellow' | 'gray' {
   return 'gray';
 }
 
-// Helper function to get container state
-function getContainerState(containerStatus: any): string {
-  if (!containerStatus) return 'Unknown';
-
-  if (containerStatus.state?.running) {
-    return 'Running';
-  } else if (containerStatus.state?.waiting) {
-    const reason = containerStatus.state.waiting.reason;
-    return reason ? `Waiting (${reason})` : 'Waiting';
-  } else if (containerStatus.state?.terminated) {
-    const reason = containerStatus.state.terminated.reason;
-    const exitCode = containerStatus.state.terminated.exitCode;
-    if (reason) {
-      return `Terminated (${reason}, exit code: ${exitCode})`;
-    }
-    return `Terminated (exit code: ${exitCode})`;
-  }
-
-  return 'Unknown';
-}
-
-// Helper function to extract container ports
-function extractPorts(container: any): string[] {
-  if (!container.ports || !Array.isArray(container.ports)) return [];
-
-  return container.ports.map((port: any) => {
-    const protocol = String(port.protocol || 'TCP');
-    const portNum = String(port.containerPort || port.port || '-');
-    const hostPort = port.hostPort ? `:${String(port.hostPort)}` : '';
-    const name = port.name ? ` (${String(port.name)})` : '';
-    return `${protocol}${portNum}${hostPort}${name}`;
-  });
-}
-
-// Helper function to extract environment variables
-function extractEnvVars(container: any): string[] {
-  if (!container.env || !Array.isArray(container.env)) return [];
-
-  return container.env.map((env: any) => {
-    if (env.valueFrom) {
-      // Reference to secret/configmap
-      const source = env.valueFrom.secretKeyRef ?
-        `Secret:${String(env.valueFrom.secretKeyRef.name)}.${String(env.valueFrom.secretKeyRef.key)}` :
-        env.valueFrom.configMapKeyRef ?
-          `ConfigMap:${String(env.valueFrom.configMapKeyRef.name)}.${String(env.valueFrom.configMapKeyRef.key)}` :
-          env.valueFrom.fieldRef ?
-            `FieldRef:${String(env.valueFrom.fieldRef.fieldPath)}` :
-          'Unknown';
-      return `${String(env.name)} (from ${source})`;
-    }
-    return `${String(env.name)}=${String(env.value || '')}`;
-  });
-}
-
-// Helper function to extract volume mounts
-function extractMounts(container: any): string[] {
-  if (!container.volumeMounts || !Array.isArray(container.volumeMounts)) return [];
-
-  return container.volumeMounts.map((mount: any) =>
-    `${String(mount.name)} -> ${String(mount.mountPath)}`
-  );
-}
-
-// Helper function to extract resource requirements
-function extractResources(container: any): string[] {
-  const resources: string[] = [];
-
-  if (container.resources) {
-    // Requests
-    if (container.resources.requests) {
-      if (container.resources.requests.cpu) {
-        resources.push(`CPU Request: ${String(container.resources.requests.cpu)}`);
-      }
-      if (container.resources.requests.memory) {
-        resources.push(`Memory Request: ${String(container.resources.requests.memory)}`);
-      }
-    }
-
-    // Limits
-    if (container.resources.limits) {
-      if (container.resources.limits.cpu) {
-        resources.push(`CPU Limit: ${String(container.resources.limits.cpu)}`);
-      }
-      if (container.resources.limits.memory) {
-        resources.push(`Memory Limit: ${String(container.resources.limits.memory)}`);
-      }
-    }
-  }
-
-  return resources;
-}
 
 // Helper function to extract metadata
 function extractMetadata(metadata: any) {
@@ -191,9 +106,6 @@ function extractMetadata(metadata: any) {
     annotations: Object.entries(metadata.annotations || {})
       .filter(([k]) => !String(k).includes('kubectl.kubernetes.io/'))
       .map(([k, v]) => `${String(k)}=${String(v)}`),
-    ownerReferences: (metadata.ownerReferences || []).map((ref: any) =>
-      `${String(ref.kind || 'Unknown')}/${String(ref.name || 'unknown')} (UID: ${String(ref.uid || 'unknown')})`
-    ),
     uid: String(metadata.uid || '-')
   };
 }
@@ -215,63 +127,92 @@ function extractConditions(status: any): DetailedCondition[] {
   return conditions;
 }
 
+// Helper to extract container details
+function extractContainerDetails(c: any, statusList: any[] = []): DetailedContainer {
+  const cStatus = statusList.find((s: any) => s.name === c.name);
+
+  // State Logic
+  let stateStr = 'Unknown';
+  if (cStatus?.state?.running) stateStr = `Running (Started: ${cStatus.state.running.startedAt})`;
+  else if (cStatus?.state?.waiting) stateStr = `Waiting (${cStatus.state.waiting.reason})`;
+  else if (cStatus?.state?.terminated) stateStr = `Terminated (${cStatus.state.terminated.reason}, ExitCode: ${cStatus.state.terminated.exitCode})`;
+
+  // Env Logic
+  const envs = (c.env || []).map((e: any) => {
+    if (e.valueFrom) return `${e.name} (from reference)`;
+    return `${e.name}=${String(e.value)}`;
+  });
+
+  // Mounts Logic
+  const mounts = (c.volumeMounts || []).map((m: any) => `${m.name} -> ${m.mountPath}`);
+
+  // Resources
+  const resources: string[] = [];
+  if (c.resources?.requests?.cpu) resources.push(`Req CPU: ${c.resources.requests.cpu}`);
+  if (c.resources?.requests?.memory) resources.push(`Req Mem: ${c.resources.requests.memory}`);
+  if (c.resources?.limits?.cpu) resources.push(`Lim CPU: ${c.resources.limits.cpu}`);
+  if (c.resources?.limits?.memory) resources.push(`Lim Mem: ${c.resources.limits.memory}`);
+
+  return {
+    name: String(c.name),
+    image: String(c.image),
+    imageID: String(cStatus?.imageID || '-'),
+    state: stateStr,
+    ready: Boolean(cStatus?.ready),
+    restartCount: Number(cStatus?.restartCount || 0),
+    ports: (c.ports || []).map((p: any) => `${p.containerPort}/${p.protocol || 'TCP'}`),
+    env: envs,
+    mounts: mounts,
+    resources: resources,
+    args: c.args ? c.args.map(String) : undefined,
+    command: c.command ? c.command.map(String) : undefined
+  };
+}
+
 // Transformer for Pods
 function transformPod(manifest: any, events: any[], logs?: string): InspectViewModel {
   const { metadata = {}, spec = {}, status = {} } = manifest;
-  const { name = '', namespace = '', creationTimestamp } = metadata;
 
   const podStatus = status.phase || 'Unknown';
-  const nodeName = status.nodeName || spec.nodeName || '-';
-  const podIP = status.podIP || '-';
+  const ownerRef = metadata.ownerReferences?.[0];
+  const controlledBy = ownerRef ? `${ownerRef.kind}/${ownerRef.name}` : '-';
 
-  // Extract container information
-  const detailedContainers: DetailedContainer[] = [];
+  // Extract containers separately
+  const containers = (spec.containers || []).map((c: any) => extractContainerDetails(c, status.containerStatuses));
+  const initContainers = (spec.initContainers || []).map((c: any) => extractContainerDetails(c, status.initContainerStatuses));
 
-  // Regular containers
-  if (spec.containers) {
-    spec.containers.forEach((container: any) => {
-      // IMPORTANT: Match by name, not index, for safety
-      const containerStatus = status.containerStatuses?.find((cs: any) => cs.name === container.name);
+  // Volumes
+  const volumes = (spec.volumes || []).map((v: any) => {
+    let source = 'Unknown';
+    if (v.persistentVolumeClaim) source = `PVC: ${v.persistentVolumeClaim.claimName}`;
+    else if (v.configMap) source = `ConfigMap: ${v.configMap.name}`;
+    else if (v.secret) source = `Secret: ${v.secret.secretName}`;
+    else if (v.emptyDir) source = 'EmptyDir';
+    else if (v.hostPath) source = `HostPath: ${v.hostPath.path}`;
+    else if (v.projected) source = 'Projected';
+    return `${v.name} (${source})`;
+  });
 
-      detailedContainers.push({
-        name: String(container.name),
-        image: String(container.image || '-'),
-        state: getContainerState(containerStatus),
-        ready: Boolean(containerStatus?.ready || false),
-        restartCount: Number(containerStatus?.restartCount || 0),
-        ports: extractPorts(container),
-        env: extractEnvVars(container),
-        mounts: extractMounts(container),
-        resources: extractResources(container)
-      });
-    });
-  }
+  // Node Info
+  const selectors = Object.entries(spec.nodeSelector || {}).map(([k, v]) => `${k}=${v}`);
+  const tolerations = (spec.tolerations || []).map((t: any) => {
+    const key = t.key || '';
+    const op = t.operator || 'Equal';
+    const val = t.value ? `=${t.value}` : '';
+    const eff = t.effect ? `:${t.effect}` : '';
+    return `${key}${val} (${op})${eff}`;
+  });
 
-  // Init containers
-  if (spec.initContainers) {
-    spec.initContainers.forEach((container: any) => {
-      // Match by name for init containers too
-      const containerStatus = status.initContainerStatuses?.find((cs: any) => cs.name === container.name);
+  // Conditions
+  const conditions = (status.conditions || []).map((c: any) => ({
+    type: String(c.type),
+    status: String(c.status),
+    lastTransitionTime: String(c.lastTransitionTime),
+    reason: String(c.reason || '-'),
+    message: String(c.message || '-')
+  }));
 
-      detailedContainers.push({
-        name: String(container.name),
-        image: String(container.image || '-'),
-        state: getContainerState(containerStatus),
-        ready: Boolean(containerStatus?.ready || false),
-        restartCount: Number(containerStatus?.restartCount || 0),
-        ports: extractPorts(container),
-        env: extractEnvVars(container),
-        mounts: extractMounts(container),
-        resources: extractResources(container)
-      });
-    });
-  }
-
-  // Extract conditions and metadata
-  const conditions = extractConditions(status);
-  const metadataInfo = extractMetadata(metadata);
-
-  // Transform events
+  // Events
   const transformedEvents = (events || []).slice(0, 20).map((event: any) => ({
     time: formatEventTime(event.lastTimestamp || event.firstTimestamp),
     type: event.type || 'Normal',
@@ -279,29 +220,37 @@ function transformPod(manifest: any, events: any[], logs?: string): InspectViewM
     message: event.message || '-'
   }));
 
-  // Process logs
   let processedLogs: string | undefined;
   if (logs) {
     const logLines = String(logs).split('\n');
-    processedLogs = logLines.slice(-20).join('\n');
+    processedLogs = logLines.slice(-50).join('\n'); // Show last 50 lines as requested
   }
 
   return {
     header: {
       kind: 'Pod',
-      name,
-      namespace,
+      name: String(metadata.name),
+      namespace: String(metadata.namespace),
       status: podStatus,
       statusColor: getStatusColor(podStatus),
-      age: calculateAge(creationTimestamp),
-      node: nodeName,
-      ip: podIP
+      age: calculateAge(metadata.creationTimestamp),
+      node: String(spec.nodeName || '-'),
+      ip: String(status.podIP || '-'),
+      qosClass: String(status.qosClass || '-'),
+      controlledBy
     },
-    metadata: metadataInfo,
+    metadata: {
+      labels: Object.entries(metadata.labels || {}).map(([k, v]) => `${k}=${v}`),
+      annotations: Object.entries(metadata.annotations || {}).filter(([k]) => !k.includes('kubectl')).map(([k, v]) => `${k}=${v}`),
+      uid: String(metadata.uid)
+    },
     conditions,
-    containers: detailedContainers,
-    config: [], // Pods use containers section instead
+    containers,
+    initContainers,
+    volumes,
+    nodeInfo: { selectors, tolerations },
     events: transformedEvents,
+    config: [],
     logs: processedLogs
   };
 }
@@ -348,6 +297,9 @@ function transformDevbox(manifest: any, events: any[]): InspectViewModel {
     metadata: metadataInfo,
     conditions,
     containers: [], // Devbox doesn't have containers in the traditional sense
+    initContainers: [],
+    volumes: [],
+    nodeInfo: { selectors: [], tolerations: [] },
     config,
     events: transformedEvents
   };
@@ -392,11 +344,16 @@ function transformCluster(manifest: any, events: any[]): InspectViewModel {
       namespace,
       status: clusterStatus,
       statusColor: getStatusColor(clusterStatus),
-      age: calculateAge(creationTimestamp)
+      age: calculateAge(creationTimestamp),
+      node: '-',
+      ip: '-'
     },
     metadata: metadataInfo,
     conditions,
     containers: [], // Clusters don't have containers directly
+    initContainers: [],
+    volumes: [],
+    nodeInfo: { selectors: [], tolerations: [] },
     config,
     events: transformedEvents
   };
@@ -441,11 +398,16 @@ function transformGeneral(manifest: any, events: any[]): InspectViewModel {
       namespace,
       status: resourceStatus,
       statusColor: getStatusColor(resourceStatus),
-      age: calculateAge(creationTimestamp)
+      age: calculateAge(creationTimestamp),
+      node: '-',
+      ip: '-'
     },
     metadata: metadataInfo,
     conditions,
     containers: [], // General resources don't have containers
+    initContainers: [],
+    volumes: [],
+    nodeInfo: { selectors: [], tolerations: [] },
     config,
     events: transformedEvents
   };
@@ -456,15 +418,26 @@ export function transformToViewModel(data: any): InspectViewModel | null {
   try {
     if (data.success === false && data.error) {
       return {
-        header: { kind: 'Error', name: 'Error', namespace: '-', status: 'Failed', statusColor: 'red' },
+        header: {
+          kind: 'Error',
+          name: 'Error',
+          namespace: '-',
+          status: 'Failed',
+          statusColor: 'red',
+          age: '-',
+          node: '-',
+          ip: '-'
+        },
         metadata: {
           labels: [],
           annotations: [],
-          ownerReferences: [],
           uid: '-'
         },
         conditions: [],
         containers: [],
+        initContainers: [],
+        volumes: [],
+        nodeInfo: { selectors: [], tolerations: [] },
         config: [],
         events: [],
         error: { message: data.error.message || 'Unknown error', code: data.error.code, reason: data.error.reason },

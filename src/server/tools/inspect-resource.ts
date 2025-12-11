@@ -280,11 +280,12 @@ async function fetchResourceEvents(
  */
 async function fetchPodLogs(
   podName: string,
-  namespace: string
+  namespace: string,
+  lines: number = 30
 ): Promise<{ logs?: string; error?: string }> {
   try {
     const k8sApi = kubernetesClient.getApiClient();
-    const response = await k8sApi.readNamespacedPodLog(podName, namespace, undefined, undefined, undefined, undefined, undefined, undefined, 20);
+    const response = await k8sApi.readNamespacedPodLog(podName, namespace, undefined, undefined, undefined, undefined, undefined, undefined, lines);
 
     return { logs: response.body };
   } catch (error) {
@@ -298,7 +299,7 @@ async function fetchPodLogs(
 export async function inspectResource(input: InspectResourceInput): Promise<InspectResourceResponse> {
   // Validate input
   const validatedInput = InspectResourceInputSchema.parse(input);
-  const { namespace, resource, name } = validatedInput;
+  const { namespace, resource, name, lines = 30 } = validatedInput;
 
   // Normalize resource type to lowercase
   const normalizedResourceType = resource.toLowerCase();
@@ -325,7 +326,7 @@ export async function inspectResource(input: InspectResourceInput): Promise<Insp
     fetchResourceEvents(resource, name, namespace),
     // Only fetch logs if the resource is a pod (strict check)
     normalizedResourceType === 'pod' || normalizedResourceType === 'pods'
-      ? fetchPodLogs(name, namespace)
+      ? fetchPodLogs(name, namespace, lines)
       : Promise.resolve({ logs: null }), // Explicit null for non-pod resources
   ]);
 

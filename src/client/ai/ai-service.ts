@@ -26,6 +26,7 @@ export interface CleanedParameters {
   resource: string;
   identifier: string;
   intent: 'list' | 'inspect';
+  lines?: number; // Optional lines parameter for inspect command
 }
 
 export class AIService {

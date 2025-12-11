@@ -281,6 +281,7 @@ export const InspectResourceInputSchema = z.object({
   resource: z.string().min(1, 'Resource type is required'),
   name: z.string().min(1, 'Resource name is required'),
   namespace: z.string().min(1, 'Namespace is required'),
+  lines: z.number().optional().default(30), // Optional lines parameter for logs, default 30
 });
 
 export type InspectResourceInput = z.infer<typeof InspectResourceInputSchema>;
@@ -303,6 +304,10 @@ export const INSPECT_RESOURCE_TOOL = {
       namespace: {
         type: 'string',
         description: 'The namespace where the resource is located',
+      },
+      lines: {
+        type: 'number',
+        description: 'Number of recent log lines to fetch (for pods only, default: 30)',
       },
     },
     required: ['resource', 'name', 'namespace'],

@@ -101,9 +101,27 @@ async function main() {
       return;
     }
 
-    // Detect raw mode flag
+    // Parse flags before AI processing
     const isRawMode = input.includes('--raw');
-    const cleanInput = input.replace(/--raw/g, '').trim();
+
+    // Parse --lines flag
+    const linesMatch = input.match(/--lines(?:\s+(\d+))?/);
+    let linesCount: number | undefined;
+    if (linesMatch) {
+      const linesValue = parseInt(linesMatch[1] || '30');
+      if (linesValue > 0) {
+        linesCount = linesValue;
+      } else {
+        console.error('⚠️  Invalid value for --lines. Must be a positive integer. Using default: 30');
+        linesCount = 30;
+      }
+    }
+
+    // Strip flags from input
+    const cleanInput = input
+      .replace(/--raw/g, '')
+      .replace(/--lines(?:\s+\d+)?/g, '')
+      .trim();
 
     try {
       // Parse raw parameters
@@ -120,6 +138,13 @@ async function main() {
         console.error('             node hzh');
         rl.prompt();
         return;
+      }
+
+      // Add lines parameter to cleaned params if present
+      if (linesCount && cleanedParamsList.length > 0) {
+        cleanedParamsList.forEach(params => {
+          params.lines = linesCount;
+        });
       }
 
       // Execute MCP tasks (parallel or single based on array length)
@@ -343,7 +368,8 @@ async function executeSingleMcpTask(params: CleanedParameters): Promise<{resourc
         requestArgs = {
           namespace: params.namespace,
           resource: params.resource, // Server supports both singular and plural
-          name: params.identifier    // Actual resource name for inspect
+          name: params.identifier,   // Actual resource name for inspect
+          ...(params.lines && { lines: params.lines }) // Add lines parameter if present
         };
       } else {
         // Use existing TOOL_MAPPING logic for list
