@@ -276,20 +276,47 @@ async function fetchResourceEvents(
 }
 
 /**
- * Fetch logs for a pod
+ * Fetch logs for specific containers in a pod
  */
 async function fetchPodLogs(
   podName: string,
   namespace: string,
-  lines: number = 30
+  containerNames: string[],
+  lines: number
 ): Promise<{ logs?: string; error?: string }> {
+  if (!containerNames || containerNames.length === 0) {
+    return { logs: "No containers found to fetch logs from." };
+  }
+
   try {
     const k8sApi = kubernetesClient.getApiClient();
-    const response = await k8sApi.readNamespacedPodLog(podName, namespace, undefined, undefined, undefined, undefined, undefined, undefined, lines);
+    const logPromises = containerNames.map(async (container) => {
+      try {
+        const response = await k8sApi.readNamespacedPodLog(
+          podName,
+          namespace,
+          container, // Explicitly specify container name
+          undefined, // follow
+          undefined, // insecureSkipTLSVerifyBackend
+          undefined, // limitBytes
+          undefined, // pretty
+          undefined, // previous
+          undefined, // sinceSeconds
+          lines,     // tailLines (9th arg)
+          undefined  // timestamps
+        );
+        return `=== Container: ${container} ===\n${(response.body || '').trim()}`;
+      } catch (error: any) {
+        // Don't fail the whole request if one container log fails (e.g. init container cleaned up)
+        return `=== Container: ${container} ===\n[Log fetch failed: ${error.message || 'Unknown error'}]`;
+      }
+    });
 
-    return { logs: response.body };
-  } catch (error) {
-    return { logs: "Logs unavailable" }; // Return string instead of error, as per requirements
+    const results = await Promise.all(logPromises);
+    return { logs: results.join('\n\n') };
+  } catch (error: any) {
+    const k8sError = extractKubernetesError(error);
+    return { error: `Failed to fetch logs: ${k8sError.message}` };
   }
 }
 
@@ -319,67 +346,50 @@ export async function inspectResource(input: InspectResourceInput): Promise<Insp
   }
 
   const warnings: string[] = [];
+  const response: InspectResourceResponse = { success: true };
 
-  // Execute fetches in parallel
-  const [manifestResult, eventsResult, logsResult] = await Promise.allSettled([
-    fetchResourceManifest(normalizedResourceType, name, namespace),
-    fetchResourceEvents(resource, name, namespace),
-    // Only fetch logs if the resource is a pod (strict check)
-    normalizedResourceType === 'pod' || normalizedResourceType === 'pods'
-      ? fetchPodLogs(name, namespace, lines)
-      : Promise.resolve({ logs: null }), // Explicit null for non-pod resources
-  ]);
+  // --- Step 1: Fetch Manifest FIRST (Blocking) ---
+  // We need the manifest to know which containers exist
+  const manifestResult = await fetchResourceManifest(normalizedResourceType, name, namespace);
 
-  const response: InspectResourceResponse = {
-    success: true,
-  };
-
-  // Handle manifest
-  if (manifestResult.status === 'fulfilled') {
-    if (manifestResult.value.manifest) {
-      response.manifest = manifestResult.value.manifest;
-    } else if (manifestResult.value.error) {
-      warnings.push(manifestResult.value.error);
-    }
-  } else {
-    warnings.push(`Manifest fetch failed: ${manifestResult.reason}`);
+  if (manifestResult.manifest) {
+    response.manifest = manifestResult.manifest;
+  } else if (manifestResult.error) {
+    return {
+      success: false,
+      error: { message: manifestResult.error }
+    };
   }
 
-  // Handle events
-  if (eventsResult.status === 'fulfilled') {
-    if (eventsResult.value.events) {
-      response.events = eventsResult.value.events;
-    } else if (eventsResult.value.error) {
-      warnings.push(eventsResult.value.error);
-    }
-  } else {
-    warnings.push(`Events fetch failed: ${eventsResult.reason}`);
-  }
+  // --- Step 2: Prepare Parallel Tasks ---
+  const tasks: Promise<any>[] = [];
 
-  // Handle logs (only for pods)
+  // Task A: Events (Always fetch)
+  const eventsPromise = fetchResourceEvents(resource, name, namespace).then(result => {
+    if (result.events) response.events = result.events;
+    if (result.error) warnings.push(result.error);
+  });
+  tasks.push(eventsPromise);
+
+  // Task B: Logs (Only for Pods, using container names from Manifest)
   if (normalizedResourceType === 'pod' || normalizedResourceType === 'pods') {
-    if (logsResult.status === 'fulfilled') {
-      if (logsResult.value.logs !== undefined && logsResult.value.logs !== null) {
-        response.logs = logsResult.value.logs;
-      } else if ('error' in logsResult.value && logsResult.value.error) {
-        warnings.push(logsResult.value.error);
-      }
-    } else {
-      warnings.push(`Logs fetch failed: ${logsResult.reason}`);
-    }
+    const spec = response.manifest?.spec || {};
+    const containers = (spec.containers || []).map((c: any) => c.name);
+    const initContainers = (spec.initContainers || []).map((c: any) => c.name);
+    const allContainers = [...initContainers, ...containers];
+
+    const logsPromise = fetchPodLogs(name, namespace, allContainers, lines).then(result => {
+      if (result.logs) response.logs = result.logs;
+      if (result.error) warnings.push(result.error);
+    });
+    tasks.push(logsPromise);
   }
 
-  // Add warnings to response if any
+  // --- Step 3: Execute Parallel Tasks ---
+  await Promise.all(tasks);
+
   if (warnings.length > 0) {
     response.warnings = warnings;
-  }
-
-  // Consider successful if we have at least one piece of data
-  if (!response.manifest && (!response.events || response.events.length === 0) && !response.logs) {
-    response.error = {
-      message: 'Failed to fetch any resource information',
-    };
-    response.success = false;
   }
 
   return response;

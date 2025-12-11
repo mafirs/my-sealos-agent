@@ -222,8 +222,8 @@ function transformPod(manifest: any, events: any[], logs?: string): InspectViewM
 
   let processedLogs: string | undefined;
   if (logs) {
-    const logLines = String(logs).split('\n');
-    processedLogs = logLines.slice(-50).join('\n'); // Show last 50 lines as requested
+    // Server already limits lines per container. Do NOT truncate here to avoid losing first containers.
+    processedLogs = String(logs);
   }
 
   return {

@@ -67,6 +67,104 @@ function safePad(contentWidth: number, textLength: number): string {
   return ' '.repeat(Math.max(0, contentWidth - textLength));
 }
 
+// Helper to wrap text to specified width
+function wrapText(text: string, maxWidth: number): string[] {
+  if (text.length <= maxWidth) return [text];
+
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if ((currentLine + ' ' + word).length <= maxWidth) {
+      currentLine = currentLine ? currentLine + ' ' + word : word;
+    } else {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word.length > maxWidth ? word.substring(0, maxWidth) : word;
+    }
+  }
+
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
+// Helper: Render annotation with smart JSON parsing
+function renderAnnotationValue(key: string, value: string, indent: number = 4): void {
+  const pad = ' '.repeat(indent);
+
+  // Check if value looks like JSON
+  const trimmedValue = value.trim();
+  if ((trimmedValue.startsWith('{') && trimmedValue.endsWith('}')) ||
+      (trimmedValue.startsWith('[') && trimmedValue.endsWith(']'))) {
+    try {
+      const parsed = JSON.parse(value);
+      console.log(`${pad}${COLORS.bold}${key}:${COLORS.reset}`);
+      renderJsonObject(parsed, indent + 2);
+      return;
+    } catch (e) {
+      // Not valid JSON, fall back to normal rendering
+    }
+  }
+
+  // Render simple key-value pairs
+  console.log(`${pad}${COLORS.bold}${key}:${COLORS.reset} ${value}`);
+}
+
+// Helper: Render JSON object with proper indentation
+function renderJsonObject(obj: any, indent: number): void {
+  const pad = ' '.repeat(indent);
+
+  if (Array.isArray(obj)) {
+    obj.forEach((item, index) => {
+      if (typeof item === 'object' && item !== null) {
+        console.log(`${pad}${COLORS.dim}[${index}]:${COLORS.reset}`);
+        renderJsonObject(item, indent + 2);
+      } else {
+        console.log(`${pad}• ${COLORS.dim}${item}${COLORS.reset}`);
+      }
+    });
+  } else if (typeof obj === 'object' && obj !== null) {
+    Object.entries(obj).forEach(([k, v]) => {
+      if (typeof v === 'object' && v !== null) {
+        console.log(`${pad}• ${COLORS.cyan}${k}:${COLORS.reset}`);
+        renderJsonObject(v, indent + 2);
+      } else {
+        console.log(`${pad}• ${COLORS.dim}${k}:${COLORS.reset} ${v}`);
+      }
+    });
+  } else {
+    console.log(`${pad}${COLORS.dim}${obj}${COLORS.reset}`);
+  }
+}
+
+// Helper: Determine log line color based on content
+function getLogLineColor(line: string): string {
+  const cleanLine = line.toLowerCase();
+
+  // Priority: Error > Warning > Info
+  if (/error|fail|fatal|exception|panic/i.test(cleanLine)) {
+    return COLORS.red;
+  } else if (/warn|warning/i.test(cleanLine)) {
+    return COLORS.yellow;
+  } else if (/\binfo\b/i.test(cleanLine)) {
+    return COLORS.cyan;
+  }
+
+  // Check for timestamps and make them dim
+  if (/^\d{4}-\d{2}-\d{2}|^\d{2}:\d{2}:\d{2}/.test(line)) {
+    return COLORS.gray;
+  }
+
+  // Default
+  return COLORS.dim;
+}
+
+// Helper: Apply highlighting to log line
+function highlightLogLine(line: string): string {
+  const color = getLogLineColor(line);
+  return `${color}${line}${COLORS.reset}`;
+}
+
 export function renderInspectView(viewModel: InspectViewModel): void {
   console.log('\n');
 
@@ -103,7 +201,11 @@ export function renderInspectView(viewModel: InspectViewModel): void {
     }
     if (viewModel.metadata.annotations.length > 0) {
       console.log(`  ${COLORS.bold}Annotations:${COLORS.reset}`);
-      viewModel.metadata.annotations.forEach(a => console.log(`    ${a}`));
+      viewModel.metadata.annotations.forEach(a => {
+        const [key, ...rest] = a.split('=');
+        const value = rest.join('=') || '';
+        renderAnnotationValue(key, value);
+      });
     }
   }
 
@@ -165,9 +267,40 @@ export function renderInspectView(viewModel: InspectViewModel): void {
   // --- 7. LOGS ---
   if (viewModel.logs) {
     renderSectionTitle('Recent Logs (Last 30 lines)');
-    console.log(COLORS.dim);
-    console.log(viewModel.logs); // Simply print the logs, no boxing, let terminal handle wrapping
-    console.log(COLORS.reset);
+
+    // Split logs by container separator
+    const parts = viewModel.logs.split('=== Container:');
+    parts.forEach(part => {
+      if (!part.trim()) return;
+
+      const splitIdx = part.indexOf(' ===');
+      if (splitIdx === -1) return;
+
+      const containerName = part.substring(0, splitIdx).trim();
+      const content = part.substring(splitIdx + 4).trim();
+
+      // Sub-header for container logs
+      console.log(`\n  ${COLORS.cyan}📦 ${containerName}${COLORS.reset}`);
+      console.log(`  ${COLORS.gray}─`.repeat(containerName.length + 5) + COLORS.reset);
+
+      if (content) {
+        const logLines = content.split('\n');
+        logLines.forEach(line => {
+          // Strip ANSI escape codes for wrapping
+          const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '');
+          const wrapped = wrapText(cleanLine, contentWidth - 4);
+
+          wrapped.forEach(wrappedLine => {
+            // Apply highlighting to each wrapped line
+            const highlightedLine = highlightLogLine(wrappedLine);
+            console.log(`    ${highlightedLine}`);
+          });
+        });
+      } else {
+        console.log(`    ${COLORS.dim}No logs available${COLORS.reset}`);
+      }
+    });
+    console.log(''); // Add spacing after logs section
   }
 
   // Warnings
