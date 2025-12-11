@@ -23,6 +23,8 @@ import { CleanedParameters, AIService } from './ai/ai-service';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import * as Renderer from './renderers';
+import { transformToViewModel } from './viewmodels/inspect-viewmodel';
+import { renderInspectView } from './renderers/inspect-renderer';
 
 // Global variables for process tracking
 let activeMcpServers = new Set<ChildProcess>();
@@ -609,8 +611,14 @@ function displayResults(result: any) {
 
       // Check for inspect_resource response first
       if (data.manifest || (data.events && Array.isArray(data.events))) {
-        console.log('\n🔍 Inspect Result:');
-        console.log(JSON.stringify(data, null, 2));
+        const viewModel = transformToViewModel(data);
+        if (viewModel) {
+          renderInspectView(viewModel);
+        } else {
+          console.error('Failed to transform inspect data to view model');
+          console.log('\n🔍 Raw Inspect Result:');
+          console.log(JSON.stringify(data, null, 2));
+        }
         return; // Exit early for inspect results
       }
 
