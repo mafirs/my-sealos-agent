@@ -218,8 +218,46 @@ async function main() {
       }
 
       // 3. Call AI (Existing Logic)
-      const rawArgs = cleanInput.split(/\s+/);
+      // Change to 'let' to allow augmentation
+      let rawArgs = cleanInput.split(/\s+/);
+
+      // === [NEW] Input Augmentation (Effective Args) ===
+      // Rule 1: Only augment if tokens < 2 (to pass "at least 2 params" check)
+      // Rule 2: ONLY augment namespace/zone from cache. NEVER augment name.
+      if (rawArgs.length < 2) {
+        // Order matters: Try to keep consistent structure [ns, zone, resource] or [resource, zone]
+        // But simply appending works because AI parser handles order.
+
+        if (parameters.namespace && !rawArgs.includes(parameters.namespace)) {
+            rawArgs.push(parameters.namespace);
+        }
+        if (parameters.zone && !rawArgs.includes(parameters.zone)) {
+            rawArgs.push(parameters.zone);
+        }
+
+        // Debug log if augmentation happened
+        if (rawArgs.length >= 2) {
+            console.log(`[Client] Auto-augmented input: [${rawArgs.join(', ')}]`);
+        }
+      }
+
+      // === [NEW] Context-only Early Exit ===
+      // If still not enough args after augmentation, fail LOCALLY without calling AI.
+      // This prevents "List" intent from triggering AI's default "hzh" when no zone is actually present.
+      if (rawArgs.length < 2) {
+         console.error('❌ Invalid input. Please provide at least: [namespace, resource, identifier] OR [resource, identifier] for nodes');
+         if (parameters.zone || parameters.namespace) {
+             console.error(`   Current Context: Zone=${parameters.zone || 'null'}, NS=${parameters.namespace || 'null'}`);
+         } else {
+             console.error('   (No Context Cached)');
+         }
+         console.error('   Examples: ns-mh69tey1 pods hzh');
+         rl.prompt();
+         return; // STOP execution here
+      }
+
       console.error('[AI] Processing input...');
+      // Pass the augmented 'rawArgs' to AI
       const cleanedParamsList = await aiService.parseRawInput(rawArgs, lastToolResult);
 
       if (!cleanedParamsList || cleanedParamsList.length === 0) {
