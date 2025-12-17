@@ -27,67 +27,89 @@ import { transformToViewModel } from './viewmodels/inspect-viewmodel';
 import { renderInspectView } from './renderers/inspect-renderer';
 import { sortKeys } from './utils/sort-keys';
 
-// === Smart Context Management ===
-interface GlobalContext {
+// === [NEW] Global Context Management (Refined) ===
+interface GlobalParameters {
   zone: string | null;
   namespace: string | null;
   resource: string | null;
   name: string | null;
-  lastUpdate: number;
 }
 
-// Known values for validation
+// 1. Initialize Context (Strict Null)
+let parameters: GlobalParameters = { zone: null, namespace: null, resource: null, name: null };
+
+// 2. Constants
 const KNOWN_ZONES = new Set(['hzh', 'bja', 'gzg']);
+// Command keywords to ignore when parsing 'name'
+const IGNORED_KEYWORDS = new Set(['describe', 'inspect', 'get', 'list', 'show', 'watch', 'debug']);
 const KNOWN_RESOURCES = new Set([
   'cluster', 'node', 'account', 'debt', 'devbox',
   'objectstorage', 'obs', 'bucket', 'certificate', 'cert',
   'cronjob', 'pods', 'pod', 'ingress', 'event', 'quota'
 ]);
 
-// Global context state
-let globalContext: GlobalContext = {
-  zone: null,
-  namespace: null,
-  resource: null,
-  name: null,
-  lastUpdate: 0
-};
-
 /**
- * Updates the global parameters based on user input.
- * Logic: Smart Reset - Only clear context if Zone or NS *changes*.
+ * Updates global parameters and returns true if Scope (Zone/NS) changed.
  */
-function updateParameters(input: string): void {
-  const tokens = input.toLowerCase().split(/\s+/);
-  const newContext: Partial<GlobalContext> = {};
+function updateParameters(inputString: string): boolean {
+  const tokens = inputString.trim().split(/\s+/);
+  let [newZone, newNs, newResource, newName] = [null, null, null, null] as (string | null)[];
+  let lastResourceIndex = -1;
 
-  // Parse tokens
-  for (const token of tokens) {
-    if (!token || token === '!') continue;
+  // First pass: identify zones, namespaces, resources, and their positions
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const lower = token.toLowerCase();
 
-    if (KNOWN_ZONES.has(token)) {
-      newContext.zone = token;
-    } else if (token.startsWith('ns-')) {
-      newContext.namespace = token;
-    } else if (KNOWN_RESOURCES.has(token)) {
-      newContext.resource = token;
-    } else if (!token.startsWith('--')) {
-      newContext.name = token;
+    if (!lower || lower === '!' || IGNORED_KEYWORDS.has(lower)) continue;
+
+    if (KNOWN_ZONES.has(lower)) {
+      newZone = lower;
+    } else if (lower.startsWith('ns-')) {
+      newNs = lower;
+    } else if (KNOWN_RESOURCES.has(lower)) {
+      newResource = lower;
+      lastResourceIndex = i; // Track position of the last resource token
     }
   }
 
-  // Smart Reset Logic (Condition: Value Mismatch)
-  const isZoneChanged = newContext.zone && newContext.zone !== globalContext.zone;
-  const isNsChanged = newContext.namespace && newContext.namespace !== globalContext.namespace;
+  // Second pass: identify potential names (only tokens immediately after a resource)
+  if (lastResourceIndex !== -1 && lastResourceIndex + 1 < tokens.length) {
+    const potentialName = tokens[lastResourceIndex + 1];
+    const lowerName = potentialName.toLowerCase();
 
-  if (isZoneChanged || isNsChanged) {
-    console.error('[Context] Scope change detected. Resetting AI context.');
-    lastToolResult = null; // Clear AI context only
+    // Allow hyphenated names - only exclude if it's a zone, namespace, or ignored keyword
+    if (potentialName &&
+        !KNOWN_ZONES.has(lowerName) &&
+        !lowerName.startsWith('ns-') &&
+        !IGNORED_KEYWORDS.has(lowerName)) {
+      newName = potentialName;
+    }
   }
 
-  // Merge new values (preserve new zone/namespace values)
-  Object.assign(globalContext, newContext, { lastUpdate: Date.now() });
-  console.error('[Context Updated]', JSON.stringify(globalContext));
+  // 1. Scope Change Detection
+  // Change detected if: New value provided AND (Current is null OR New != Current)
+  const isZoneChanged = newZone !== null && newZone !== parameters.zone;
+  const isNsChanged = newNs !== null && newNs !== parameters.namespace;
+
+  const isScopeChanged = isZoneChanged || isNsChanged;
+
+  if (isScopeChanged) {
+    console.log('[Context] Scope change detected. Resetting context.');
+    parameters = { zone: null, namespace: null, resource: null, name: null };
+  }
+
+  // 2. Merge new values (Update provided fields)
+  if (newZone) parameters.zone = newZone;
+  if (newNs) parameters.namespace = newNs;
+  if (newResource) parameters.resource = newResource;
+  if (newName) parameters.name = newName;
+
+  if (newZone || newNs || newResource || newName) {
+    console.log('[Context Updated]', JSON.stringify(parameters));
+  }
+
+  return isScopeChanged;
 }
 // ==================================
 
@@ -185,17 +207,19 @@ async function main() {
       .replace(/--lines(?:\s+\d+)?/g, '')
       .trim();
 
-    // === Update Context (Smart Reset) ===
-    updateParameters(cleanInput);
-    // ===================================
-
     try {
-      // Parse raw parameters
-      const rawArgs = cleanInput.split(/\s+/);
+      // 1. Update Context & Check Scope Change
+      const isScopeChanged = updateParameters(cleanInput);
 
-      // AI cleaning parameters
+      // 2. Manage AI History
+      if (isScopeChanged) {
+         // If scope changed, previous tool outputs are likely irrelevant
+         lastToolResult = null;
+      }
+
+      // 3. Call AI (Existing Logic)
+      const rawArgs = cleanInput.split(/\s+/);
       console.error('[AI] Processing input...');
-      // Pass lastToolResult to AI
       const cleanedParamsList = await aiService.parseRawInput(rawArgs, lastToolResult);
 
       if (!cleanedParamsList || cleanedParamsList.length === 0) {
@@ -205,6 +229,43 @@ async function main() {
         rl.prompt();
         return;
       }
+
+      // === [NEW] Parameter Fusion Logic ===
+      // Use for..of instead of forEach to allow early return on errors
+      for (const item of cleanedParamsList) {
+        // A. Namespace Fusion (Always merge)
+        if (!item.namespace && parameters.namespace) {
+          item.namespace = parameters.namespace;
+          console.log(`[Fusion] Auto-filled namespace: ${parameters.namespace}`);
+        }
+
+        // B. Intent-specific Logic
+        if (item.intent === 'list') {
+          // Rule: Clear name cache on List
+          if (parameters.name) {
+            parameters.name = null;
+            console.log('[Fusion] List intent: Cleared cached name.');
+          }
+          // Rule: Force zone as identifier if missing or is a known zone
+          const isMissingOrZone = !item.identifier || KNOWN_ZONES.has(item.identifier.toLowerCase());
+          if (isMissingOrZone && parameters.zone) {
+            item.identifier = parameters.zone;
+            console.log(`[Fusion] List intent: Auto-filled zone: ${parameters.zone}`);
+          }
+        } else if (item.intent === 'inspect') {
+          // Rule: DO NOT auto-fill name from cache - describe/inspect MUST have explicit name
+          // If identifier is missing or generic, show immediate error and abort
+          const isMissingOrZone = !item.identifier || KNOWN_ZONES.has(item.identifier.toLowerCase());
+          if (isMissingOrZone) {
+            console.error('[Fusion] ERROR: Inspect intent requires explicit name/identifier');
+            console.error('   Usage: describe <resource> <name>');
+            console.error('   Example: describe devbox my-app');
+            rl.prompt(); // Return to prompt immediately
+            return; // Abort execution - exits the try block entirely
+          }
+        }
+      }
+      // ======================================
 
       // Add lines parameter to cleaned params if present
       if (linesCount && cleanedParamsList.length > 0) {
