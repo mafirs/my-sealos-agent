@@ -51,8 +51,8 @@ const RESOURCE_MAPPING: Record<string, { group: string; version: string; plural:
   'horizontalpodautoscalers': { group: 'autoscaling', version: 'v2', plural: 'horizontalpodautoscalers' },
 
   // Sealos CRDs (CORRECTED based on working list-* implementations)
-  'devbox': { group: 'devbox.sealos.io', version: 'v1alpha1', plural: 'devboxes' },
-  'devboxes': { group: 'devbox.sealos.io', version: 'v1alpha1', plural: 'devboxes' },
+  'devbox': { group: 'devbox.sealos.io', version: 'v1alpha2', plural: 'devboxes' },
+  'devboxes': { group: 'devbox.sealos.io', version: 'v1alpha2', plural: 'devboxes' },
   'cluster': { group: 'apps.kubeblocks.io', version: 'v1alpha1', plural: 'clusters' },        // FIXED: v1 → v1alpha1
   'clusters': { group: 'apps.kubeblocks.io', version: 'v1alpha1', plural: 'clusters' },       // FIXED: v1 → v1alpha1
   'account': { group: 'account.sealos.io', version: 'v1', plural: 'accounts' },             // FIXED: user.sealos.io → account.sealos.io

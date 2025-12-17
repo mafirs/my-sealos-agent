@@ -27,10 +27,75 @@ import { transformToViewModel } from './viewmodels/inspect-viewmodel';
 import { renderInspectView } from './renderers/inspect-renderer';
 import { sortKeys } from './utils/sort-keys';
 
+// === Smart Context Management ===
+interface GlobalContext {
+  zone: string | null;
+  namespace: string | null;
+  resource: string | null;
+  name: string | null;
+  lastUpdate: number;
+}
+
+// Known values for validation
+const KNOWN_ZONES = new Set(['hzh', 'bja', 'gzg']);
+const KNOWN_RESOURCES = new Set([
+  'cluster', 'node', 'account', 'debt', 'devbox',
+  'objectstorage', 'obs', 'bucket', 'certificate', 'cert',
+  'cronjob', 'pods', 'pod', 'ingress', 'event', 'quota'
+]);
+
+// Global context state
+let globalContext: GlobalContext = {
+  zone: null,
+  namespace: null,
+  resource: null,
+  name: null,
+  lastUpdate: 0
+};
+
+/**
+ * Updates the global parameters based on user input.
+ * Logic: Smart Reset - Only clear context if Zone or NS *changes*.
+ */
+function updateParameters(input: string): void {
+  const tokens = input.toLowerCase().split(/\s+/);
+  const newContext: Partial<GlobalContext> = {};
+
+  // Parse tokens
+  for (const token of tokens) {
+    if (!token || token === '!') continue;
+
+    if (KNOWN_ZONES.has(token)) {
+      newContext.zone = token;
+    } else if (token.startsWith('ns-')) {
+      newContext.namespace = token;
+    } else if (KNOWN_RESOURCES.has(token)) {
+      newContext.resource = token;
+    } else if (!token.startsWith('--')) {
+      newContext.name = token;
+    }
+  }
+
+  // Smart Reset Logic (Condition: Value Mismatch)
+  const isZoneChanged = newContext.zone && newContext.zone !== globalContext.zone;
+  const isNsChanged = newContext.namespace && newContext.namespace !== globalContext.namespace;
+
+  if (isZoneChanged || isNsChanged) {
+    console.error('[Context] Scope change detected. Resetting AI context.');
+    lastToolResult = null; // Clear AI context only
+  }
+
+  // Merge new values (preserve new zone/namespace values)
+  Object.assign(globalContext, newContext, { lastUpdate: Date.now() });
+  console.error('[Context Updated]', JSON.stringify(globalContext));
+}
+// ==================================
+
 // Global variables for process tracking
 let activeMcpServers = new Set<ChildProcess>();
 let mainReadlineInterface: readline.Interface | null = null;
 let lastSigintTime = 0;
+let lastToolResult: any = null; // Global AI context memory
 
 function cleanupAndExit(code: number) {
   // Kill all active MCP server processes
@@ -62,9 +127,6 @@ function cleanupAndExit(code: number) {
 async function main() {
   // Initialize services
   const aiService = new AIService();
-
-  // Context memory for AI
-  let lastToolResult: any = null;
 
   // Create readline interface for REPL mode
   const rl = readline.createInterface({
@@ -122,6 +184,10 @@ async function main() {
       .replace(/--raw/g, '')
       .replace(/--lines(?:\s+\d+)?/g, '')
       .trim();
+
+    // === Update Context (Smart Reset) ===
+    updateParameters(cleanInput);
+    // ===================================
 
     try {
       // Parse raw parameters

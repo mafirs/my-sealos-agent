@@ -12,7 +12,7 @@ export async function listDevboxByNamespace(input: ListDevboxByNsInput) {
 
     const response = await customObjectsApi.listNamespacedCustomObject(
       'devbox.sealos.io',  // group
-      'v1alpha1',          // version
+      'v1alpha2',          // version
       namespace,           // namespace
       'devboxes'           // plural
     );

@@ -20,7 +20,7 @@
 
 # Sealos CRD 关键字段 JSON Path 映射表
 
-## 1. Devbox (`devbox.sealos.io/v1alpha1`)
+## 1. Devbox (`devbox.sealos.io/v1alpha2`)
 
 ### Spec 字段
 
