@@ -7,7 +7,7 @@
     "build": "tsc",
     "dev": "npm run dev:http",
     "start": "npm run start:http",
-    "start:http": "NODE_ENV=${NODE_ENV:-production} node dist/server/http-server.js",
+    "start:http": "NODE_ENV=production node dist/server/http-server.js",
     "start:client": "node dist/client/index.js",
     "dev:http": "NODE_ENV=development ts-node src/server/http-server.ts",
     "dev:client": "ts-node src/client/index.ts",

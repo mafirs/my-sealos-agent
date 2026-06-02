@@ -53,26 +53,22 @@ const AI_BASE_URL = process.env.AI_BASE_URL;
 const AI_MODEL = process.env.AI_MODEL || "gemini-1.5-flash";
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 35_000);
 const isDevelopment = process.env.NODE_ENV === 'development';
-const MAX_DEVELOPMENT_LOG_STRING_LENGTH = 8_000;
 
 function logDevelopment(...args: unknown[]): void {
   if (isDevelopment) {
-    console.error(...args);
+    console.log(...args);
   }
 }
 
 function formatLogValue(value: unknown): string {
   if (typeof value === 'string') {
-    return value.length > MAX_DEVELOPMENT_LOG_STRING_LENGTH
-      ? `${value.slice(0, MAX_DEVELOPMENT_LOG_STRING_LENGTH)}... [truncated]`
-      : value;
+    return value;
   }
 
   return inspect(value, {
     depth: 8,
     colors: false,
     maxArrayLength: 50,
-    maxStringLength: MAX_DEVELOPMENT_LOG_STRING_LENGTH,
     breakLength: 120,
   });
 }
@@ -477,14 +473,6 @@ async function routerNode(state: AgentState): Promise<Partial<AgentState>> {
   const userContext = buildRouterUserContext(state);
   const routerUserContent = buildRouterUserContent(state);
 
-  logDevelopment('[Router] Routing context:', formatLogValue(userContext.trim()));
-  logDevelopment(
-    '[Router] Routing image count:',
-    Array.isArray(routerUserContent)
-      ? routerUserContent.filter((item) => item.type === 'image_url').length
-      : 0
-  );
-
   async function invokeRouter(content: string | RouterMessageContentItem[]) {
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -586,12 +574,7 @@ async function executorNode(state: AgentState): Promise<Partial<AgentState>> {
     };
   }
 
-  logDevelopment('[Agent] Executing selected tool:', selectedTool);
-  logDevelopment('[Agent] Tool input:', formatLogValue(input));
-
   const result = await tool.run(state.k8sClient, input);
-
-  logDevelopment('[Agent] Tool result:', formatLogValue(result));
 
   return {
     finalResult: {
