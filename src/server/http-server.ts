@@ -7,7 +7,6 @@ import { getAgentRunnable, AgentState, SUPPORTED_ZONES, ZONE_KUBECONFIG_MAP } fr
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const isDevelopment = process.env.NODE_ENV === 'development';
 const INSPECTOR_API_KEY_HEADER = 'x-tentix-inspector-key';
 const DEFAULT_JSON_BODY_LIMIT = '256kb';
 const JSON_BODY_LIMIT = getJsonBodyLimit();
@@ -33,12 +32,6 @@ type PendingInspection = {
   resolve: (release: InspectionSlotRelease | null) => void;
   timer: ReturnType<typeof setTimeout>;
 };
-
-function logDevelopment(...args: unknown[]): void {
-  if (isDevelopment) {
-    console.error(...args);
-  }
-}
 
 let activeInspections = 0;
 const pendingInspections: PendingInspection[] = [];
@@ -393,19 +386,6 @@ app.post('/api/skills', authenticateInspectorRequest, jsonBodyParser, async (req
       requestKubeconfig,
     };
 
-    logDevelopment('[HTTP] /api/skills request debug:', {
-      zone,
-      namespace,
-      hasRequestKubeconfig: Boolean(requestKubeconfig),
-      ticketTitle: body.ticketTitle ?? '',
-      ticketModule: body.ticketModule ?? '',
-      ticketCategory: body.ticketCategory ?? '',
-      ticketDescriptionLength: (body.ticketDescription ?? '').length,
-      historyMessagesLength: (body.historyMessages ?? '').length,
-      latestMessageLength: (body.latestMessage ?? '').length,
-      latestMessageImagesCount: body.latestMessageImages?.length ?? 0,
-    });
-
     const releaseInspection = await acquireInspectionSlot();
     if (!releaseInspection) {
       sendInspectionBusyResponse(res, zone, namespace);
@@ -420,19 +400,11 @@ app.post('/api/skills', authenticateInspectorRequest, jsonBodyParser, async (req
       const finalResult = finalState.finalResult ?? null;
 
       if (isRecord(finalResult) && finalResult.tool === 'none') {
-        logDevelopment('[HTTP] /api/skills response debug:', { zone, namespace, status: 204, tool: 'none' });
         return res.status(204).end();
       }
 
       const status = getSkillsResponseStatus(finalResult);
       const responseBody = sanitizeFinalResult(finalResult, status);
-
-      logDevelopment('[HTTP] /api/skills response debug:', {
-        zone,
-        namespace,
-        status,
-        tool: isRecord(finalResult) ? finalResult.tool : undefined,
-      });
 
       res.status(status).json(responseBody);
     } finally {
